@@ -88,7 +88,31 @@ const NEIGHBOURS: ReadonlyArray<readonly [number, number, number]> = [
  * la plus proche : c'est exactement ce qu'on veut quand on ordonne « va
  * récolter cet arbre » ou « attaque ce bâtiment ».
  */
-export function findPath(world: World, from: Point, to: Point, maxNodes = 6000): Point[] {
+/**
+ * Tampons de travail de l'A*, réutilisés d'un appel à l'autre.
+ *
+ * Sur une carte de 120 × 120, allouer trois tableaux de 14 400 cases à chaque
+ * recherche de chemin — et il y en a plusieurs par seconde et par unité —
+ * saturerait le ramasse-miettes à lui seul. On les garde et on les réinitialise.
+ */
+const scratch = {
+  size: 0,
+  cameFrom: new Int32Array(0),
+  gScore: new Float32Array(0),
+  closed: new Uint8Array(0),
+};
+
+function ensureScratch(size: number): typeof scratch {
+  if (scratch.size !== size) {
+    scratch.size = size;
+    scratch.cameFrom = new Int32Array(size);
+    scratch.gScore = new Float32Array(size);
+    scratch.closed = new Uint8Array(size);
+  }
+  return scratch;
+}
+
+export function findPath(world: World, from: Point, to: Point, maxNodes = 30000): Point[] {
   const startX = Math.floor(from.x);
   const startY = Math.floor(from.y);
   let goalX = Math.floor(to.x);
@@ -107,9 +131,10 @@ export function findPath(world: World, from: Point, to: Point, maxNodes = 6000):
 
   const width = world.width;
   const size = width * world.height;
-  const cameFrom = new Int32Array(size).fill(-1);
-  const gScore = new Float32Array(size).fill(Infinity);
-  const closed = new Uint8Array(size);
+  const { cameFrom, gScore, closed } = ensureScratch(size);
+  cameFrom.fill(-1);
+  gScore.fill(Infinity);
+  closed.fill(0);
 
   const startIndex = startY * width + startX;
   const goalIndex = goalY * width + goalX;

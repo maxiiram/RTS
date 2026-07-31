@@ -42,6 +42,43 @@ const shot = async (name) => {
 await page.goto(url, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 
+/**
+ * Position à l'écran d'une entité choisie par un prédicat, en pixels.
+ *
+ * Cliquer à des coordonnées écrites en dur rendait ce test dépendant de la
+ * carte : le moindre changement de génération le faisait échouer sans qu'aucun
+ * bug n'ait été introduit. On demande donc au jeu où se trouve la cible.
+ */
+const screenPositionOf = (kind) =>
+  page.evaluate(async (wanted) => {
+    const { world, renderer } = window.rts;
+    const { tileToScreen } = await import('/src/sim/grid.ts');
+
+    const villager = [...world.entities.values()].find(
+      (e) => e.kind === 'unit' && e.owner === 0,
+    );
+    if (!villager) return null;
+
+    let best = null;
+    let bestDistance = Infinity;
+    for (const e of world.entities.values()) {
+      if (wanted === 'wood' && !(e.kind === 'resource' && e.resource === 'wood')) continue;
+      if (wanted === 'townCenter' && !(e.owner === 0 && e.defId === 'centre_ville')) continue;
+      const distance = Math.hypot(e.x - villager.x, e.y - villager.y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = e;
+      }
+    }
+    if (!best) return null;
+
+    const point = tileToScreen(best.x, best.y);
+    return {
+      x: renderer.world.position.x + point.x * renderer.world.scale.x,
+      y: renderer.world.position.y + point.y * renderer.world.scale.y,
+    };
+  }, kind);
+
 const state = () => page.evaluate(() => {
   const { world, selection } = window.rts;
   const units = (owner) =>
@@ -76,7 +113,9 @@ check('la sélection au rectangle attrape les paysans', (await state()).selectio
 
 // — Récolte —
 const woodBefore = (await state()).wood;
-await page.mouse.click(500, 470, { button: 'right' });
+const tree = await screenPositionOf('wood');
+check('un bosquet est accessible depuis la base', tree !== null);
+await page.mouse.click(tree.x, tree.y, { button: 'right' });
 await page.locator('.speeds button[data-speed="8"]').click();
 await page.waitForTimeout(9000);
 const woodAfter = (await state()).wood;
@@ -85,7 +124,8 @@ await shot('02-recolte');
 
 // — Production —
 await page.locator('.speeds button[data-speed="1"]').click();
-await page.mouse.click(720, 340);
+const townCenter = await screenPositionOf('townCenter');
+await page.mouse.click(townCenter.x, townCenter.y - 20);
 await page.waitForTimeout(300);
 const buttons = await page.locator('#actions-panel button').count();
 check('le centre-ville propose ses productions', buttons >= 4, `${buttons} boutons`);

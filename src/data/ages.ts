@@ -3,11 +3,11 @@ import type { AgeDef, AgeId } from './types.ts';
 /**
  * Progression en 3 âges (GDD §5).
  *
- * Les coûts et durées sont calibrés pour le rythme « lent et stratégique » :
- * avec une économie de début de partie (~8 paysans, cf. src/balance/economy.ts),
- * l'âge 2 tombe autour de 8-10 minutes et l'âge 3 vers 20 minutes.
- * Le premier affrontement sérieux arrive donc après une vraie phase économique,
- * et non dans les trois premières minutes.
+ * Les coûts et durées sont calibrés pour le rythme « lent et stratégique ».
+ * Ils ont été relevés après un premier essai jugé trop expéditif : sur la
+ * grande carte, l'âge 2 tombe autour de 11-13 minutes et l'âge 3 vers
+ * 25 minutes, pour une partie qui ressemble à une escarmouche d'Age of
+ * Empires plutôt qu'à une course de dix minutes.
  */
 export const AGES: Record<AgeId, AgeDef> = {
   1: {
@@ -17,15 +17,15 @@ export const AGES: Record<AgeId, AgeDef> = {
   2: {
     id: 2,
     nameFr: 'Âge Féodal',
-    advanceCost: { food: 500 },
-    advanceTime: 75,
+    advanceCost: { food: 600 },
+    advanceTime: 100,
     requiredBuildings: 2,
   },
   3: {
     id: 3,
     nameFr: 'Âge des Châteaux',
-    advanceCost: { food: 800, gold: 400 },
-    advanceTime: 120,
+    advanceCost: { food: 1000, gold: 600 },
+    advanceTime: 160,
     requiredBuildings: 2,
   },
 };

@@ -16,9 +16,19 @@ npm run dev     # http://localhost:5173
 combattre. Une partie se joue du début à la fin, victoire comprise (destruction
 totale de l'adversaire, GDD §8).
 
-- **Carte isométrique** de 64 × 64 tuiles, générée à partir d'une graine : deux
-  bases opposées, dotation de départ identique, ressources neutres au centre
-  pour donner un enjeu à l'expansion.
+- **Carte isométrique** de 120 × 120 tuiles, générée à partir d'une graine :
+  deux bases en diagonale opposée, dotation de départ strictement identique
+  (un miroir, aucun camp n'est avantagé), et zones neutres au centre pour
+  donner un enjeu à l'expansion.
+- **Zones de ressources d'un seul tenant**, à la manière d'Age of Empires : une
+  forêt est une masse compacte que l'on exploite par sa lisière, un filon d'or
+  un tas de quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et
+  à la mine — on pose un dépôt au bord d'une zone — et ce qui fait des zones du
+  centre un enjeu territorial plutôt qu'un semis d'arbres isolés.
+- **Brouillard de guerre** : noir sur ce qui n'a jamais été exploré, voilé sur
+  ce qui l'a été mais n'est plus observé. Le terrain et les bâtiments découverts
+  restent mémorisés, les unités adverses disparaissent dès qu'on cesse de les
+  voir — la règle d'Age of Empires. Cliquer dans le brouillard ne révèle rien.
 - **Sélection** au clic ou au rectangle, **ordres contextuels** au clic droit —
   la cible détermine l'action (marcher, récolter, bâtir, attaquer).
 - **Ordres de groupe** : un groupe sélectionné se commande comme une seule
@@ -62,9 +72,9 @@ Par ordre d'importance pour la suite :
 
 1. **Aucun graphisme.** Tout est en formes géométriques, sur la palette chaude
    du GDD §10. Les sprites viendront avec le moodboard.
-2. **Pas de brouillard de guerre.** La carte entière est visible. Ça change
-   beaucoup le jeu — l'IA comme le joueur voient tout — et c'est le prochain
-   grand chantier de gameplay.
+2. **L'IA n'est pas soumise au brouillard.** Le joueur l'est, elle non : elle
+   raisonne encore sur l'état complet de la carte. C'est le comportement
+   d'Age of Empires 1, mais ça reste une inégalité à corriger.
 3. **Pas de multijoueur.** La simulation est déterministe et prête pour du
    lockstep (voir plus bas), mais il n'y a ni réseau ni serveur.
 4. **Pas d'arbre technologique.** La forge se construit mais ne propose aucune
@@ -89,6 +99,9 @@ Limites connues du prototype, moins graves mais réelles :
   lent serait plus propre visuellement, mais rendrait la cavalerie inutilisable
   en escorte.
 - Pas de groupes de contrôle (Ctrl+1 pour mémoriser une sélection).
+- La lisière du brouillard est franche, tuile par tuile. Un dégradé serait plus
+  doux à l'œil.
+- Pas de mini-carte, ce qui se sent nettement sur 120 × 120.
 - La ferme s'épuise et disparaît, mais rien ne prévient le joueur avant.
 
 ---
@@ -116,6 +129,31 @@ Quatre tests jouent la situation exacte — un mur percé d'un seul passage — 
 vérifient qu'un groupe le franchit, que deux colonnes en sens inverse se
 croisent, qu'une unité à l'arrêt finit par céder le passage, et qu'aucune unité
 ne termine encastrée dans un obstacle.
+
+---
+
+## Le sol et le brouillard sont des images, pas des losanges
+
+Sur 120 × 120, dessiner le damier du sol tuile par tuile revient à redessiner
+14 400 losanges à chaque image — et autant pour le brouillard. C'est la
+première chose qui s'écroule quand la carte grandit.
+
+Les deux calques sont donc devenus des **textures d'un pixel par tuile**,
+affichées avec la matrice de la projection isométrique. Cette projection étant
+une transformation linéaire, le carré du pixel (x, y) devient exactement le
+losange de la tuile (x, y) : le rendu est identique, le filtrage est en
+« plus proche voisin » donc parfaitement net, et il ne reste qu'un seul objet
+à afficher au lieu de 14 400. Le brouillard n'est réécrit que lorsque la vision
+change, deux fois par seconde.
+
+Les entités sont en plus découpées par la fenêtre d'affichage : une entité hors
+de l'écran, ou que le joueur ne voit pas, n'a aucun objet d'affichage.
+
+*Mesure honnête* : le conteneur qui a servi au développement n'a pas de carte
+graphique — un simple remplissage plein écran y plafonne à 13 images par
+seconde. **Les images par seconde n'y sont donc pas mesurables.** Ce qui l'est,
+et qui a été vérifié : un tick de simulation coûte 0,10 ms et un appel de rendu
+0,08 ms avec 1 127 entités, soit moins de 1 % d'un budget d'image à 60 Hz.
 
 ---
 
@@ -154,7 +192,7 @@ moindre écart de calcul entre deux machines fait diverger la partie.
 ## Tests
 
 ```bash
-npm test                  # 64 vérifications, dont 26 de simulation
+npm test                  # 70 vérifications, dont 32 de simulation
 npm run balance           # rapport d'équilibrage
 npm run typecheck
 node scripts/smoke.mjs    # parcours complet dans un vrai navigateur

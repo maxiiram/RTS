@@ -11,7 +11,7 @@ import { footprintOf, inBounds, rebuildBlocked } from './grid.ts';
 import { Rng } from './rng.ts';
 import type { Entity, PlayerId, Point, World } from './types.ts';
 
-export const MAP_SIZE = 64;
+export const MAP_SIZE = 120;
 
 /** Couleurs des deux royaumes (GDD §3). */
 export const SAPHIR = 0x4a7fd4;
@@ -116,12 +116,12 @@ export function spawnResource(
   return e;
 }
 
-export function createWorld(seed = 20260731): World {
+export function createWorld(seed = 20260731, size = MAP_SIZE): World {
   const world: World = {
     tick: 0,
     time: 0,
-    width: MAP_SIZE,
-    height: MAP_SIZE,
+    width: size,
+    height: size,
     entities: new Map(),
     nextId: 1,
     players: [
@@ -148,7 +148,9 @@ export function createWorld(seed = 20260731): World {
         defeated: false,
       },
     ],
-    blocked: new Uint8Array(MAP_SIZE * MAP_SIZE),
+    blocked: new Uint8Array(size * size),
+    visibility: [new Uint8Array(size * size), new Uint8Array(size * size)],
+    visibilityVersion: 0,
     log: [],
     winner: null,
   };
@@ -156,88 +158,166 @@ export function createWorld(seed = 20260731): World {
   generateMap(world, seed);
   rebuildBlocked(world);
   recomputePopulation(world);
+  updateVisibility(world);
   return world;
 }
 
 /**
- * Génération de carte : deux bases opposées en diagonale, chacune avec sa
- * dotation de départ (bois, or, pierre, nourriture) à portée raisonnable, et
- * des ressources neutres au centre pour donner une raison de s'étendre.
+ * Génération de carte.
+ *
+ * Les ressources ne sont pas semées une par une : elles forment des **zones
+ * d'un seul tenant**, comme dans Age of Empires. Une forêt est une masse
+ * compacte que l'on exploite par sa lisière, un filon d'or est un tas de
+ * quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et à la
+ * mine — on installe un dépôt au bord d'une zone — et ce qui fait des zones
+ * du centre un enjeu territorial, plutôt qu'un semis d'arbres isolés.
+ *
+ * Les deux bases sont en diagonale opposée, avec une dotation strictement
+ * identique : c'est un miroir, aucun camp n'est avantagé.
  */
 function generateMap(world: World, seed: number): void {
   const rng = new Rng(seed);
-  const occupied = new Set<string>();
+  const taken = new Uint8Array(world.width * world.height);
 
-  const reserve = (x: number, y: number): boolean => {
-    const key = `${x},${y}`;
-    if (occupied.has(key)) return false;
-    if (!inBounds(world, x, y)) return false;
-    occupied.add(key);
-    return true;
+  const isFree = (x: number, y: number): boolean => {
+    if (x < 2 || y < 2 || x >= world.width - 2 || y >= world.height - 2) return false;
+    return taken[y * world.width + x] === 0;
+  };
+
+  const take = (x: number, y: number): void => {
+    taken[y * world.width + x] = 1;
+  };
+
+  /** Réserve une zone dégagée : rien ne pousse trop près d'un centre-ville. */
+  const clear = (cx: number, cy: number, radius: number): void => {
+    for (let y = cy - radius; y <= cy + radius; y++) {
+      for (let x = cx - radius; x <= cx + radius; x++) {
+        if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
+        if (Math.hypot(x - cx, y - cy) <= radius) take(x, y);
+      }
+    }
   };
 
   const bases: Array<{ owner: PlayerId; x: number; y: number }> = [
-    { owner: 0, x: 10, y: 10 },
-    { owner: 1, x: MAP_SIZE - 14, y: MAP_SIZE - 14 },
+    { owner: 0, x: 14, y: 14 },
+    { owner: 1, x: world.width - 18, y: world.height - 18 },
   ];
 
+  // 1. Les bases d'abord, pour que rien ne pousse dessus.
   for (const base of bases) {
     const tc = BUILDINGS['centre_ville'];
     if (!tc) throw new Error('Centre-ville manquant dans les données');
 
-    for (let dy = 0; dy < tc.footprint.h; dy++) {
-      for (let dx = 0; dx < tc.footprint.w; dx++) reserve(base.x + dx, base.y + dy);
-    }
+    clear(base.x + tc.footprint.w / 2, base.y + tc.footprint.h / 2, 7);
     spawnBuilding(world, 'centre_ville', base.owner, base.x, base.y);
 
-    // Trois paysans, comme prévu par les constantes de départ.
     for (let i = 0; i < 3; i++) {
       spawnUnit(world, 'paysan', base.owner, base.x + 5.5 + i * 0.8, base.y + 5.5);
     }
-
-    // Baies : la nourriture de démarrage, tout près du centre-ville.
-    placeCluster(world, rng, reserve, 'food', base.x + 8, base.y + 1, 6, 2);
-    // Forêt : la ressource la plus consommée en début de partie.
-    placeCluster(world, rng, reserve, 'wood', base.x - 4, base.y + 6, 26, 4);
-    placeCluster(world, rng, reserve, 'wood', base.x + 7, base.y + 9, 18, 3);
-    // Or et pierre un peu plus loin : il faut aller les chercher.
-    placeCluster(world, rng, reserve, 'gold', base.x + 12, base.y + 6, 5, 2);
-    placeCluster(world, rng, reserve, 'stone', base.x + 3, base.y + 13, 4, 2);
   }
 
-  // Ressources neutres au centre : l'enjeu de l'expansion territoriale.
-  const mid = MAP_SIZE / 2;
-  placeCluster(world, rng, reserve, 'gold', mid - 3, mid - 3, 8, 3);
-  placeCluster(world, rng, reserve, 'stone', mid + 4, mid + 2, 7, 3);
-  placeCluster(world, rng, reserve, 'food', mid + 2, mid - 6, 6, 2);
+  // 2. Dotation de départ, à l'identique pour les deux royaumes. Les décalages
+  //    sont miroir, si bien que chaque camp trouve la même chose au même
+  //    endroit relatif : les distances de récolte sont rigoureusement égales.
+  const layout: Array<{ resource: ResourceId; dx: number; dy: number; size: number }> = [
+    { resource: 'food', dx: 10, dy: -1, size: 7 },
+    { resource: 'food', dx: -2, dy: 10, size: 6 },
+    { resource: 'wood', dx: -9, dy: 7, size: 70 },
+    { resource: 'wood', dx: 11, dy: 11, size: 55 },
+    { resource: 'gold', dx: 14, dy: 4, size: 6 },
+    { resource: 'stone', dx: 3, dy: 15, size: 5 },
+  ];
 
-  // Bosquets dispersés, pour casser la monotonie et gêner les déplacements.
-  for (let i = 0; i < 18; i++) {
-    placeCluster(world, rng, reserve, 'wood', rng.int(6, MAP_SIZE - 8), rng.int(6, MAP_SIZE - 8), rng.int(4, 10), 3);
+  for (const base of bases) {
+    const mirror = base.owner === 0 ? 1 : -1;
+    for (const patch of layout) {
+      growPatch(
+        world,
+        rng,
+        patch.resource,
+        base.x + patch.dx * mirror,
+        base.y + patch.dy * mirror,
+        patch.size,
+        isFree,
+        take,
+      );
+    }
+  }
+
+  // 3. Zones neutres : l'enjeu de l'expansion territoriale (GDD §4).
+  const mid = Math.floor(world.width / 2);
+  growPatch(world, rng, 'gold', mid - 6, mid - 6, 9, isFree, take);
+  growPatch(world, rng, 'gold', mid + 8, mid + 5, 8, isFree, take);
+  growPatch(world, rng, 'stone', mid + 6, mid - 8, 8, isFree, take);
+  growPatch(world, rng, 'stone', mid - 8, mid + 7, 7, isFree, take);
+  growPatch(world, rng, 'food', mid + 2, mid - 3, 8, isFree, take);
+  growPatch(world, rng, 'food', mid - 3, mid + 3, 8, isFree, take);
+
+  // 4. Grandes forêts réparties sur la carte. Elles structurent le terrain :
+  //    couloirs, contournements, endroits où poser une muraille.
+  const forests = 14;
+  for (let i = 0; i < forests; i++) {
+    const x = rng.int(8, world.width - 9);
+    const y = rng.int(8, world.height - 9);
+    growPatch(world, rng, 'wood', x, y, rng.int(35, 90), isFree, take);
   }
 }
 
-function placeCluster(
+/**
+ * Fait croître une zone de ressource d'un seul tenant, par agrégation.
+ *
+ * On part d'une tuile et on ajoute à chaque étape une case adjacente à la zone
+ * déjà formée. Le résultat est une masse compacte aux contours irréguliers —
+ * une vraie forêt, pas un nuage de points.
+ */
+function growPatch(
   world: World,
   rng: Rng,
-  reserve: (x: number, y: number) => boolean,
   resource: ResourceId,
   cx: number,
   cy: number,
-  count: number,
-  radius: number,
+  size: number,
+  isFree: (x: number, y: number) => boolean,
+  take: (x: number, y: number) => void,
 ): void {
-  let placed = 0;
-  let attempts = 0;
+  const startX = Math.round(cx);
+  const startY = Math.round(cy);
 
-  while (placed < count && attempts < count * 12) {
+  // Si le point de départ est pris, on cherche tout près plutôt que d'abandonner.
+  let origin: Point | null = null;
+  for (let radius = 0; radius <= 6 && !origin; radius++) {
+    for (let dy = -radius; dy <= radius && !origin; dy++) {
+      for (let dx = -radius; dx <= radius && !origin; dx++) {
+        if (isFree(startX + dx, startY + dy)) origin = { x: startX + dx, y: startY + dy };
+      }
+    }
+  }
+  if (!origin) return;
+
+  const placed: Point[] = [origin];
+  take(origin.x, origin.y);
+  spawnResource(world, resource, origin.x, origin.y);
+
+  const neighbours: ReadonlyArray<readonly [number, number]> = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+
+  let attempts = 0;
+  while (placed.length < size && attempts < size * 30) {
     attempts++;
-    const x = Math.round(cx + rng.range(-radius, radius));
-    const y = Math.round(cy + rng.range(-radius, radius));
-    if (x < 2 || y < 2 || x >= MAP_SIZE - 2 || y >= MAP_SIZE - 2) continue;
-    if (!reserve(x, y)) continue;
+    const from = placed[rng.int(0, placed.length - 1)] as Point;
+    const step = neighbours[rng.int(0, 3)] as readonly [number, number];
+    const x = from.x + step[0];
+    const y = from.y + step[1];
+
+    if (!isFree(x, y)) continue;
+
+    take(x, y);
     spawnResource(world, resource, x, y);
-    placed++;
+    placed.push({ x, y });
   }
 }
 
@@ -463,6 +543,78 @@ export function actionLabel(unit: Entity): string {
     return `Récolte : ${RESOURCES[unit.carrying.resource].nameFr.toLowerCase()}`;
   }
   return ACTION_LABELS[action];
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Brouillard de guerre
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recalcule ce que chaque joueur voit.
+ *
+ * Une case déjà explorée le reste définitivement — on se souvient du terrain —
+ * mais elle repasse « hors de vue » dès qu'aucune unité ni bâtiment ne la
+ * couvre. C'est la règle d'Age of Empires : le relief est mémorisé, ce qui s'y
+ * passe ne l'est pas.
+ */
+export function updateVisibility(world: World): void {
+  for (const map of world.visibility) {
+    // Le visible retombe à « exploré » ; l'inexploré reste noir.
+    for (let i = 0; i < map.length; i++) {
+      if (map[i] === 2) map[i] = 1;
+    }
+  }
+
+  for (const e of world.entities.values()) {
+    if (e.owner === null || e.hp <= 0) continue;
+
+    const range =
+      e.kind === 'unit' ? (UNITS[e.defId]?.los ?? 5) : (BUILDINGS[e.defId]?.los ?? 5);
+
+    revealCircle(world.visibility[e.owner], world, e.x, e.y, range);
+  }
+
+  world.visibilityVersion++;
+}
+
+function revealCircle(map: Uint8Array, world: World, cx: number, cy: number, radius: number): void {
+  const minX = Math.max(0, Math.floor(cx - radius));
+  const maxX = Math.min(world.width - 1, Math.ceil(cx + radius));
+  const minY = Math.max(0, Math.floor(cy - radius));
+  const maxY = Math.min(world.height - 1, Math.ceil(cy + radius));
+  const squared = radius * radius;
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const dx = x + 0.5 - cx;
+      const dy = y + 0.5 - cy;
+      if (dx * dx + dy * dy > squared) continue;
+      map[y * world.width + x] = 2;
+    }
+  }
+}
+
+/** 0 inexploré, 1 exploré, 2 visible. */
+export function visibilityAt(world: World, player: PlayerId, x: number, y: number): number {
+  const tx = Math.floor(x);
+  const ty = Math.floor(y);
+  if (!inBounds(world, tx, ty)) return 0;
+  return world.visibility[player][ty * world.width + tx] ?? 0;
+}
+
+/**
+ * Le joueur peut-il voir cette entité ?
+ *
+ * Les unités adverses disparaissent dès qu'on cesse de les observer. Les
+ * bâtiments et les gisements, eux, restent affichés une fois découverts : on
+ * se souvient de ce qu'on a vu, même sans savoir ce qu'il s'y passe depuis.
+ */
+export function isEntityVisible(world: World, player: PlayerId, e: Entity): boolean {
+  if (e.owner === player) return true;
+
+  const state = visibilityAt(world, player, e.x, e.y);
+  if (e.kind === 'unit') return state === 2;
+  return state >= 1;
 }
 
 export function logEvent(world: World, message: string): void {

@@ -10,6 +10,10 @@ import type { BuildingDef } from './types.ts';
  * Les PV des bâtiments sont élevés par rapport aux dégâts des unités : un
  * centre-ville ne tombe pas à quatre soldats. C'est ce qui rend l'attaque
  * coûteuse et donc préparée, conformément au rythme lent du GDD §4.
+ *
+ * `los` est la portée de vision : elle détermine ce que le bâtiment dévoile du
+ * brouillard de guerre. La tour de garde voit plus loin qu'elle ne tire, ce qui
+ * en fait autant un poste d'observation qu'une défense.
  */
 export const BUILDINGS: Record<string, BuildingDef> = {
   // ─────────────────────────────────────────────────────────────────────────
@@ -25,6 +29,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 300, stone: 150 },
     buildTime: 120,
     footprint: { w: 4, h: 4 },
+    los: 10,
     popProvided: 10,
     dropOff: ['food', 'wood', 'gold', 'stone'],
     trains: ['paysan', 'fermier', 'bucheron', 'mineur', 'apprenti_soldat'],
@@ -40,6 +45,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 40 },
     buildTime: 25,
     footprint: { w: 2, h: 2 },
+    los: 4,
     popProvided: 5,
   },
 
@@ -52,6 +58,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 80 },
     buildTime: 30,
     footprint: { w: 2, h: 2 },
+    los: 5,
     dropOff: ['wood'],
   },
 
@@ -64,6 +71,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 70 },
     buildTime: 25,
     footprint: { w: 3, h: 3 },
+    los: 4,
     dropOff: ['food'],
     // Stock fini : la ferme s'épuise et doit être reconstruite. C'est le
     // puits de nourriture de fin de partie, une fois le gibier et les baies
@@ -80,6 +88,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 100 },
     buildTime: 35,
     footprint: { w: 2, h: 2 },
+    los: 5,
     dropOff: ['gold', 'stone'],
   },
 
@@ -96,6 +105,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 175 },
     buildTime: 60,
     footprint: { w: 3, h: 3 },
+    los: 6,
     trains: ['soldat', 'chevalier', 'chevalier_armure', 'chevalier_lance'],
   },
 
@@ -108,6 +118,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 175 },
     buildTime: 60,
     footprint: { w: 3, h: 3 },
+    los: 6,
     trains: ['archer'],
   },
 
@@ -120,6 +131,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 200 },
     buildTime: 65,
     footprint: { w: 3, h: 3 },
+    los: 6,
     trains: ['cavalier_lance', 'chevalier_porte_etendard'],
   },
 
@@ -135,6 +147,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { stone: 5 },
     buildTime: 8,
     footprint: { w: 1, h: 1 },
+    los: 3,
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -150,6 +163,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 150, gold: 50 },
     buildTime: 70,
     footprint: { w: 3, h: 3 },
+    los: 6,
     // Les améliorations elles-mêmes restent à concevoir (arbre technologique).
   },
 
@@ -162,6 +176,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     cost: { wood: 50, stone: 125 },
     buildTime: 50,
     footprint: { w: 2, h: 2 },
+    los: 11,
     // Portée supérieure à celle de l'archer (7 contre 5) : une tour couvre
     // ses défenseurs et oblige l'attaquant à amener de quoi la démonter.
     combat: {

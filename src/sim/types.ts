@@ -95,6 +95,13 @@ export interface World {
   players: [PlayerState, PlayerState];
   /** Cases infranchissables (bâtiments, gisements), recalculé à chaque changement. */
   blocked: Uint8Array;
+  /**
+   * Brouillard de guerre, une carte par joueur :
+   * 0 = jamais exploré, 1 = exploré mais hors de vue, 2 = actuellement visible.
+   */
+  visibility: [Uint8Array, Uint8Array];
+  /** Incrémenté à chaque recalcul, pour que le rendu sache quand redessiner. */
+  visibilityVersion: number;
   /** Messages destinés au bandeau d'information. */
   log: string[];
   winner: PlayerId | null;

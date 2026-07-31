@@ -6,10 +6,11 @@
  * pas, et ça tourne en quelques secondes.
  */
 
-import { ok, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { SIM_TICK_SECONDS } from '../data/constants.ts';
+import { SIM_TICK_SECONDS, STARTING_RESOURCES } from '../data/constants.ts';
+import { AGES } from '../data/ages.ts';
 import { UNITS } from '../data/units.ts';
 import { createAi, stepAi } from './ai.ts';
 import { ageProgress, orderGather, orderGroup, orderMove, sandboxSpawn, train } from './commands.ts';
@@ -19,10 +20,12 @@ import type { Entity, World } from './types.ts';
 import {
   createWorld,
   findNearest,
+  isEntityVisible,
   isHarvestable,
   spawnBuilding,
   spawnResource,
   spawnUnit,
+  visibilityAt,
 } from './world.ts';
 
 /** Fait tourner la simulation pendant N secondes de temps de jeu. */
@@ -63,6 +66,127 @@ describe('génération du monde', () => {
     const signature = (w: World) =>
       [...w.entities.values()].map((e) => `${e.defId}:${e.x.toFixed(3)}:${e.y.toFixed(3)}`).join('|');
     strictEqual(signature(a), signature(b));
+  });
+});
+
+describe('zones de ressources', () => {
+  it('les gisements forment des zones d\'un seul tenant, pas un semis', () => {
+    // Le GDD veut des forêts et des filons à la manière d'Age of Empires :
+    // on exploite la lisière d'une masse, on ne court pas d'un arbre isolé au
+    // suivant. On mesure donc le voisinage de chaque gisement.
+    const world = createWorld();
+    const nodes = [...world.entities.values()].filter((e) => e.kind === 'resource');
+    const byTile = new Map<string, Entity>();
+    for (const node of nodes) byTile.set(`${Math.floor(node.x)},${Math.floor(node.y)}`, node);
+
+    let isolated = 0;
+    for (const node of nodes) {
+      const x = Math.floor(node.x);
+      const y = Math.floor(node.y);
+      const neighbours = [
+        byTile.get(`${x + 1},${y}`),
+        byTile.get(`${x - 1},${y}`),
+        byTile.get(`${x},${y + 1}`),
+        byTile.get(`${x},${y - 1}`),
+      ].filter((n) => n?.resource === node.resource);
+
+      if (neighbours.length === 0) isolated++;
+    }
+
+    const ratio = isolated / nodes.length;
+    ok(ratio < 0.05, `${Math.round(ratio * 100)} % des gisements sont isolés de leur zone`);
+  });
+
+  it('les deux royaumes reçoivent exactement la même dotation de départ', () => {
+    const world = createWorld();
+
+    const nearBase = (owner: number) => {
+      const tc = [...world.entities.values()].find(
+        (e) => e.owner === owner && e.defId === 'centre_ville',
+      ) as Entity;
+
+      const counts: Record<string, number> = { food: 0, wood: 0, gold: 0, stone: 0 };
+      for (const e of world.entities.values()) {
+        if (e.kind !== 'resource' || e.resource === null) continue;
+        if (Math.hypot(e.x - tc.x, e.y - tc.y) > 22) continue;
+        counts[e.resource] = (counts[e.resource] ?? 0) + 1;
+      }
+      return counts;
+    };
+
+    // Miroir strict : aucun camp ne doit démarrer avantagé.
+    deepStrictEqual(nearBase(0), nearBase(1));
+  });
+});
+
+describe('brouillard de guerre', () => {
+  it('la base est visible, le reste de la carte est inexploré', () => {
+    const world = createWorld();
+    const tc = [...world.entities.values()].find(
+      (e) => e.owner === 0 && e.defId === 'centre_ville',
+    ) as Entity;
+
+    strictEqual(visibilityAt(world, 0, tc.x, tc.y), 2);
+
+    const enemyTc = [...world.entities.values()].find(
+      (e) => e.owner === 1 && e.defId === 'centre_ville',
+    ) as Entity;
+    strictEqual(visibilityAt(world, 0, enemyTc.x, enemyTc.y), 0);
+  });
+
+  it('une unité adverse hors de vue reste invisible', () => {
+    const world = createWorld();
+    const enemy = spawnUnit(world, 'soldat', 1, 60, 60);
+    run(world, 1);
+
+    strictEqual(isEntityVisible(world, 0, enemy), false);
+  });
+
+  it('un éclaireur dévoile le terrain, qui reste ensuite mémorisé', () => {
+    const world = createWorld();
+    const scout = unitsOf(world, 0)[0] as Entity;
+    const target = { x: scout.x + 25, y: scout.y };
+
+    strictEqual(visibilityAt(world, 0, target.x, target.y), 0);
+
+    orderMove(scout, target.x, target.y);
+    run(world, 60);
+
+    strictEqual(visibilityAt(world, 0, target.x, target.y), 2);
+
+    // L'éclaireur repart : le terrain reste connu, mais n'est plus observé.
+    orderMove(scout, scout.x - 30, scout.y);
+    run(world, 60);
+
+    strictEqual(
+      visibilityAt(world, 0, target.x, target.y),
+      1,
+      'le terrain exploré devrait rester mémorisé sans rester visible',
+    );
+  });
+
+  it('on se souvient des bâtiments découverts, jamais des unités', () => {
+    // Règle d'Age of Empires : le relief et les constructions sont mémorisés,
+    // ce qui bouge ne l'est pas.
+    const world = createWorld();
+    const scout = unitsOf(world, 0)[0] as Entity;
+
+    // Deux paysans face à face : ni l'un ni l'autre n'engage le combat, ce qui
+    // isole la question de la visibilité de celle des dégâts.
+    const enemyBuilding = spawnBuilding(world, 'maison', 1, 30, 30);
+    const enemyUnit = spawnUnit(world, 'paysan', 1, 33.5, 31.5);
+
+    orderMove(scout, 33, 31);
+    run(world, 90);
+
+    ok(isEntityVisible(world, 0, enemyBuilding), 'le bâtiment devrait être visible sur place');
+    ok(isEntityVisible(world, 0, enemyUnit), "l'unité devrait être visible sur place");
+
+    orderMove(scout, scout.x - 40, scout.y);
+    run(world, 90);
+
+    ok(isEntityVisible(world, 0, enemyBuilding), 'le bâtiment découvert devrait rester affiché');
+    strictEqual(isEntityVisible(world, 0, enemyUnit), false, "l'unité ne devrait plus être visible");
   });
 });
 
@@ -406,8 +530,10 @@ describe('progression d\'âge', () => {
 
     strictEqual(progress.nextAge, 2);
     strictEqual(progress.nameFr, 'Âge Féodal');
-    // 500 de nourriture demandés, 200 en réserve au départ.
-    strictEqual(progress.missing.food, 300);
+    // Le manque se déduit des données, jamais d'un chiffre recopié : retoucher
+    // le coût d'un âge ne doit pas casser un test qui n'en parle pas.
+    const required = AGES[2].advanceCost?.food ?? 0;
+    strictEqual(progress.missing.food, required - STARTING_RESOURCES.food);
     strictEqual(progress.buildingsOwned, 0);
     strictEqual(progress.buildingsRequired, 2);
     strictEqual(progress.ready, false);
@@ -415,7 +541,7 @@ describe('progression d\'âge', () => {
 
   it('ne signale plus les ressources une fois le coût couvert', () => {
     const world = createWorld();
-    world.players[0].resources.food = 900;
+    world.players[0].resources.food = 5000;
 
     const progress = ageProgress(world, 0);
     strictEqual(Object.keys(progress.missing).length, 0);
@@ -425,9 +551,9 @@ describe('progression d\'âge', () => {
 
   it('passe à « prêt » quand ressources et bâtiments sont réunis', () => {
     const world = createWorld();
-    world.players[0].resources.food = 900;
-    spawnBuilding(world, 'maison', 0, 20, 20);
-    spawnBuilding(world, 'camp_bucheron', 0, 24, 20);
+    world.players[0].resources.food = 5000;
+    spawnBuilding(world, 'maison', 0, 40, 40);
+    spawnBuilding(world, 'camp_bucheron', 0, 44, 40);
 
     const progress = ageProgress(world, 0);
     strictEqual(progress.buildingsOwned, 2);
@@ -438,8 +564,8 @@ describe('progression d\'âge', () => {
     // Le centre-ville est offert au départ : le compter reviendrait à offrir
     // un tiers du prérequis. Un chantier inachevé ne prouve rien non plus.
     const world = createWorld();
-    world.players[0].resources.food = 900;
-    spawnBuilding(world, 'maison', 0, 20, 20, false);
+    world.players[0].resources.food = 5000;
+    spawnBuilding(world, 'maison', 0, 40, 40, false);
 
     strictEqual(ageProgress(world, 0).buildingsOwned, 0);
   });

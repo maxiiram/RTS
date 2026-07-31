@@ -89,7 +89,7 @@ function tileAtScreenCentre(): { x: number; y: number } {
 
 function pickAtScreen(screenX: number, screenY: number): Entity | null {
   const point = renderer.screenToWorld(screenX, screenY);
-  return renderer.pick(world, point.x, point.y);
+  return renderer.pick(world, PLAYER, point.x, point.y);
 }
 
 function selectAt(screenX: number, screenY: number, additive: boolean): void {
@@ -308,8 +308,8 @@ async function start(): Promise<void> {
   if (!stage) throw new Error('Conteneur de rendu introuvable');
 
   await renderer.init(stage);
-  renderer.drawTerrain(world);
-  renderer.centerOn(14, 14);
+  renderer.buildLayers(world);
+  renderer.centerOn(18, 18);
   setupInput(renderer.app.canvas);
 
   exposeDebugHandle();
@@ -340,7 +340,7 @@ async function start(): Promise<void> {
       if (!world.entities.has(id)) selection.delete(id);
     }
 
-    renderer.render(world, selection, currentGhost());
+    renderer.render(world, PLAYER, selection, currentGhost());
     hud.update(world, selection);
   });
 }

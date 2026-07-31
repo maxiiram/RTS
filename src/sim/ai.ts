@@ -35,11 +35,11 @@ export interface AiState {
 }
 
 export function createAi(owner: PlayerId): AiState {
-  return { owner, cooldown: 0, attackTimer: 240, enabled: true };
+  return { owner, cooldown: 0, attackTimer: 420, enabled: true };
 }
 
 /** Nombre de paysans visé avant de basculer sur la production militaire. */
-const VILLAGER_TARGET = 16;
+const VILLAGER_TARGET = 20;
 /** Taille d'armée à partir de laquelle l'IA attaque. */
 const ARMY_TARGET = 8;
 
@@ -249,8 +249,9 @@ function manageArmy(world: World, ai: AiState, military: Entity[]): void {
     orderAttack(unit, target);
   }
 
-  // Prochain assaut dans trois minutes : le temps de reconstituer une armée.
-  ai.attackTimer = 180;
+  // Prochain assaut dans quatre minutes : le temps de reconstituer une armée
+  // et, sur cette carte, de refaire le trajet.
+  ai.attackTimer = 240;
 }
 
 /** Envoie toute l'armée à un point, sans cible précise (utilisé par l'interface). */

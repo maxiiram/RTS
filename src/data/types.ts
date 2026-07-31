@@ -108,6 +108,8 @@ export interface BuildingDef {
   buildTime: number;
   /** Emprise au sol en tuiles. */
   footprint: { w: number; h: number };
+  /** Portée de vision, en tuiles : ce que le bâtiment dévoile du brouillard. */
+  los: number;
   /** Population maximale ajoutée. */
   popProvided?: number;
   /** Ressources que ce bâtiment accepte en dépôt. */

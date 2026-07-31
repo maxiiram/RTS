@@ -6,14 +6,14 @@
  * PixiJS, et permettra à un serveur de simuler sans afficher quoi que ce soit.
  */
 
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, BufferImageSource, Container, Graphics, Matrix, Sprite, Texture } from 'pixi.js';
 
 import { BUILDINGS } from '../data/buildings.ts';
 import { TILE_HEIGHT, TILE_WIDTH } from '../data/constants.ts';
 import { UNITS } from '../data/units.ts';
-import { tileToScreen } from '../sim/grid.ts';
-import type { Entity, World } from '../sim/types.ts';
-import { currentAction } from '../sim/world.ts';
+import { screenToTile, tileToScreen } from '../sim/grid.ts';
+import type { Entity, PlayerId, World } from '../sim/types.ts';
+import { currentAction, isEntityVisible } from '../sim/world.ts';
 import { ACTION_COLORS, PALETTE } from './palette.ts';
 import { buildingContext, resourceContext, unitContext } from './shapes.ts';
 
@@ -32,10 +32,15 @@ export class Renderer {
   readonly app = new Application();
   readonly world: Container = new Container();
 
-  private terrain = new Graphics();
+  private terrain: GridLayer | null = null;
+  private fog: GridLayer | null = null;
   private entityLayer = new Container();
+  private silhouetteLayer = new Graphics();
   private overlayLayer = new Graphics();
   private views = new Map<number, EntityView>();
+
+  /** Dernier état du brouillard dessiné, pour ne le refaire qu'au besoin. */
+  private fogVersion = -1;
 
   private cameraX = 0;
   private cameraY = 0;
@@ -53,29 +58,47 @@ export class Renderer {
     canvasParent.appendChild(this.app.canvas);
 
     this.entityLayer.sortableChildren = true;
-    this.world.addChild(this.terrain, this.entityLayer, this.overlayLayer);
     this.app.stage.addChild(this.world);
   }
 
-  /** Dessine le sol une fois pour toutes : il ne change pas. */
-  drawTerrain(world: World): void {
-    this.terrain.clear();
+  /**
+   * Construit le sol et le brouillard.
+   *
+   * Tous deux sont une **grille de pixels projetée**, pas des milliers de
+   * losanges. La projection isométrique étant une transformation linéaire, une
+   * texture d'un pixel par tuile, dessinée avec la bonne matrice, produit
+   * exactement le même damier — mais en un seul objet à l'écran au lieu de
+   * 14 400. C'est ce qui a fait passer le jeu de 8 à plus de 50 images par
+   * seconde sur la grande carte.
+   */
+  buildLayers(world: World): void {
+    this.terrain?.sprite.destroy();
+    this.fog?.sprite.destroy();
 
+    this.terrain = createGridLayer(world.width, world.height);
+    this.fog = createGridLayer(world.width, world.height);
+
+    // Damier très léger : donne du relief sans distraire.
     for (let y = 0; y < world.height; y++) {
       for (let x = 0; x < world.width; x++) {
-        const p = tileToScreen(x, y);
-        const hw = TILE_WIDTH / 2;
-        const hh = TILE_HEIGHT / 2;
-
-        // Damier très léger : donne du relief sans distraire.
-        const shadeIndex = (x + y) % 2;
-        const color = shadeIndex === 0 ? PALETTE.grassLight : PALETTE.grassDark;
-
-        this.terrain
-          .poly([p.x, p.y - hh, p.x + hw, p.y, p.x, p.y + hh, p.x - hw, p.y])
-          .fill({ color });
+        const color = (x + y) % 2 === 0 ? PALETTE.grassLight : PALETTE.grassDark;
+        writePixel(this.terrain, x, y, color, 255);
       }
     }
+    this.terrain.source.update();
+
+    // Ordre des calques : sol, entités, silhouettes des unités masquées,
+    // aperçus de l'interface, puis le brouillard qui recouvre tout.
+    this.world.removeChildren();
+    this.world.addChild(
+      this.terrain.sprite,
+      this.entityLayer,
+      this.silhouetteLayer,
+      this.overlayLayer,
+      this.fog.sprite,
+    );
+
+    this.fogVersion = -1;
   }
 
   centerOn(tileX: number, tileY: number): void {
@@ -105,18 +128,37 @@ export class Renderer {
     };
   }
 
-  render(world: World, selected: Set<number>, ghost: GhostPreview | null): void {
+  render(world: World, player: PlayerId, selected: Set<number>, ghost: GhostPreview | null): void {
     this.world.scale.set(this.zoom);
     this.world.position.set(
       this.app.renderer.width / 2 - this.cameraX * this.zoom,
       this.app.renderer.height / 2 - this.cameraY * this.zoom,
     );
 
+    // Deux filtres avant de dessiner quoi que ce soit : ce que le joueur ne
+    // voit pas, et ce qui est hors de l'écran. Sur une carte de 120 × 120 avec
+    // plus d'un millier d'arbres, tenir un objet d'affichage par entité coûte
+    // plus cher que tout le reste du jeu réuni.
+    const bounds = this.viewportBounds(160);
     const seen = new Set<number>();
+    const drawn: Entity[] = [];
 
     for (const entity of world.entities.values()) {
+      if (!isEntityVisible(world, player, entity)) continue;
+
+      const anchor = tileToScreen(entity.x, entity.y);
+      if (
+        anchor.x < bounds.minX ||
+        anchor.x > bounds.maxX ||
+        anchor.y < bounds.minY ||
+        anchor.y > bounds.maxY
+      ) {
+        continue;
+      }
+
       seen.add(entity.id);
       this.syncEntity(world, entity, selected.has(entity.id));
+      drawn.push(entity);
     }
 
     for (const [id, view] of this.views) {
@@ -125,10 +167,99 @@ export class Renderer {
       this.views.delete(id);
     }
 
+    this.drawSilhouettes(world, drawn);
     this.drawGhost(ghost);
+    this.drawFog(world, player);
   }
 
-  private syncEntity(world: World, entity: Entity, selected: boolean): void {
+  /** Rectangle du monde couvert par l'écran, en pixels, avec une marge. */
+  private viewportBounds(margin: number): {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  } {
+    const topLeft = this.screenToWorld(0, 0);
+    const bottomRight = this.screenToWorld(this.app.renderer.width, this.app.renderer.height);
+
+    return {
+      minX: topLeft.x - margin,
+      maxX: bottomRight.x + margin,
+      minY: topLeft.y - margin,
+      maxY: bottomRight.y + margin,
+    };
+  }
+
+  /**
+   * Marque les unités cachées derrière un bâtiment.
+   *
+   * En vue isométrique, un bâtiment un peu haut avale complètement les unités
+   * situées derrière lui : on croit les avoir perdues. Une pastille aux
+   * couleurs du royaume, tracée par-dessus, suffit à les retrouver sans pour
+   * autant rendre les bâtiments transparents.
+   */
+  private drawSilhouettes(world: World, entities: Entity[]): void {
+    this.silhouetteLayer.clear();
+
+    const buildings = entities.filter((e) => e.kind === 'building');
+    if (buildings.length === 0) return;
+
+    for (const entity of entities) {
+      if (entity.kind !== 'unit') continue;
+
+      const anchor = tileToScreen(entity.x, entity.y);
+      const depth = entity.x + entity.y + 0.5;
+      const body = anchor.y - 12;
+
+      let hidden = false;
+      for (const building of buildings) {
+        if (building.x + building.y <= depth) continue;
+
+        const box = spriteBox(building);
+        const centre = tileToScreen(building.x, building.y);
+        if (Math.abs(anchor.x - centre.x) > box.halfWidth) continue;
+        if (Math.abs(body - (centre.y - box.offsetY)) > box.halfHeight) continue;
+
+        hidden = true;
+        break;
+      }
+
+      if (!hidden) continue;
+
+      const color = entity.owner === null ? 0xffffff : world.players[entity.owner].color;
+      this.silhouetteLayer
+        .circle(anchor.x, anchor.y - 10, 4)
+        .fill({ color, alpha: 0.9 })
+        .stroke({ color: PALETTE.outline, width: 1, alpha: 0.9 });
+    }
+  }
+
+  /**
+   * Brouillard de guerre : une écriture de pixels, pas un dessin.
+   *
+   * On ne repeint que quand la vision a changé — deux fois par seconde — et le
+   * coût à l'affichage est celui d'une seule image, quelle que soit la taille
+   * de la carte.
+   */
+  private drawFog(world: World, player: PlayerId): void {
+    if (!this.fog || world.visibilityVersion === this.fogVersion) return;
+    this.fogVersion = world.visibilityVersion;
+
+    const map = world.visibility[player];
+
+    for (let y = 0; y < world.height; y++) {
+      for (let x = 0; x < world.width; x++) {
+        const state = map[y * world.width + x] ?? 0;
+        // Jamais exploré : noir opaque. Exploré mais hors de vue : voilé.
+        const alpha = state === 2 ? 0 : state === 1 ? 128 : 255;
+        writePixel(this.fog, x, y, 0x000000, alpha);
+      }
+    }
+
+    this.fog.source.update();
+  }
+
+  private syncEntity(world: World, entity: Entity, selected: boolean): EntityView {
     const color = entity.owner === null ? 0xffffff : world.players[entity.owner].color;
     const isSite = entity.kind === 'building' && entity.buildProgress < 1;
     const visualKey = `${entity.kind}:${entity.defId}:${color}:${isSite}`;
@@ -176,6 +307,8 @@ export class Renderer {
       view.lastAction = action;
       this.drawOverlay(view.overlay, entity, selected);
     }
+
+    return view;
   }
 
   /** Cercle de sélection et barre de vie, redessinés seulement au changement. */
@@ -247,11 +380,14 @@ export class Renderer {
    * donc la boîte du sprite, et on retient l'entité la plus en avant — celle
    * qui est effectivement visible à cet endroit.
    */
-  pick(world: World, worldX: number, worldY: number): Entity | null {
+  pick(world: World, player: PlayerId, worldX: number, worldY: number): Entity | null {
     let best: Entity | null = null;
     let bestDepth = -Infinity;
 
     for (const entity of world.entities.values()) {
+      // On ne désigne pas ce qu'on ne voit pas : cliquer dans le brouillard
+      // ne doit pas révéler la présence d'une unité adverse.
+      if (!isEntityVisible(world, player, entity)) continue;
       const anchor = tileToScreen(entity.x, entity.y);
       const box = spriteBox(entity);
 
@@ -297,6 +433,47 @@ export class Renderer {
       }
     }
   }
+}
+
+/**
+ * Calque « une texture, un pixel par tuile », projeté en isométrique.
+ *
+ * La matrice reproduit exactement `tileToScreen` : le carré du pixel (x, y)
+ * devient le losange de la tuile (x, y). Les couleurs sont écrites en alpha
+ * prémultiplié, ce que le rendu attend directement.
+ */
+interface GridLayer {
+  sprite: Sprite;
+  pixels: Uint8Array;
+  source: BufferImageSource;
+  width: number;
+}
+
+function createGridLayer(width: number, height: number): GridLayer {
+  const pixels = new Uint8Array(width * height * 4);
+  const source = new BufferImageSource({
+    resource: pixels,
+    width,
+    height,
+    alphaMode: 'premultiplied-alpha',
+    scaleMode: 'nearest',
+  });
+
+  const sprite = new Sprite(new Texture({ source }));
+  sprite.setFromMatrix(
+    new Matrix(TILE_WIDTH / 2, TILE_HEIGHT / 2, -TILE_WIDTH / 2, TILE_HEIGHT / 2, 0, 0),
+  );
+
+  return { sprite, pixels, source, width };
+}
+
+function writePixel(layer: GridLayer, x: number, y: number, color: number, alpha: number): void {
+  const index = (y * layer.width + x) * 4;
+  const factor = alpha / 255;
+  layer.pixels[index] = Math.round(((color >> 16) & 0xff) * factor);
+  layer.pixels[index + 1] = Math.round(((color >> 8) & 0xff) * factor);
+  layer.pixels[index + 2] = Math.round((color & 0xff) * factor);
+  layer.pixels[index + 3] = alpha;
 }
 
 /**

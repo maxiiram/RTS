@@ -29,6 +29,7 @@ import {
   logEvent,
   recomputePopulation,
   spawnUnit,
+  updateVisibility,
 } from './world.ts';
 
 /** Distance à laquelle un paysan peut récolter ou bâtir. */
@@ -67,6 +68,10 @@ export function stepWorld(world: World): void {
     recomputePopulation(world);
     checkVictory(world);
   }
+
+  // Le brouillard se rafraîchit deux fois par seconde : assez pour ne pas
+  // sentir de retard à l'écran, assez rare pour ne rien coûter.
+  if (world.tick % 10 === 0) updateVisibility(world);
 
   for (const player of world.players) {
     if (player.advancing === null) continue;

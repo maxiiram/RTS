@@ -19,7 +19,7 @@ destruction de la base adverse, contre une IA d'escarmouche.
 - ✅ [Game Design Document](docs/GDD.md)
 - ✅ [Équilibrage chiffré](docs/BALANCE.md) — unités, bâtiments, économie, âges
 - ✅ [Prototype jouable](docs/PROTOTYPE.md) — carte, récolte, construction, combat, IA
-- ⬜ Brouillard de guerre
+- ✅ Brouillard de guerre et carte de 120 × 120
 - ⬜ Arbre technologique
 - ⬜ Direction artistique : palette et sprites
 - ⬜ Multijoueur
@@ -42,7 +42,7 @@ Node 22.18 ou plus récent (les fichiers `.ts` s'exécutent nativement, sans
 ```bash
 npm run dev        # serveur de développement
 npm run build      # page statique dans dist/, hébergeable telle quelle
-npm test           # 64 vérifications : données, équilibrage, simulation
+npm test           # 70 vérifications : données, équilibrage, simulation
 npm run balance    # rapport d'équilibrage : duels, rendements, rythme
 npm run typecheck
 
