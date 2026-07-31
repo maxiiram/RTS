@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Projet RTS — Saphir contre Rubis</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="stage"></div>
+
+    <div id="ui">
+      <header id="topbar">
+        <div class="resources">
+          <span class="res" data-res="food"><i>🍖</i><b id="res-food">0</b></span>
+          <span class="res" data-res="wood"><i>🪵</i><b id="res-wood">0</b></span>
+          <span class="res" data-res="gold"><i>🪙</i><b id="res-gold">0</b></span>
+          <span class="res" data-res="stone"><i>🪨</i><b id="res-stone">0</b></span>
+          <span class="res pop"><i>👥</i><b id="res-pop">0/0</b></span>
+        </div>
+
+        <div class="age">
+          <b id="age-label">Âge des Villages</b>
+          <button id="advance-btn" type="button">Passer à l'âge suivant</button>
+        </div>
+
+        <div class="clock">
+          <b id="clock">0:00</b>
+          <div class="speeds">
+            <button type="button" data-speed="0">❚❚</button>
+            <button type="button" data-speed="1" class="active">×1</button>
+            <button type="button" data-speed="2">×2</button>
+            <button type="button" data-speed="4">×4</button>
+            <button type="button" data-speed="8">×8</button>
+          </div>
+        </div>
+      </header>
+
+      <aside id="sandbox">
+        <h2>Bac à sable</h2>
+        <p class="hint">Pour éprouver l'équilibrage sans jouer la partie.</p>
+
+        <label>Unité
+          <select id="sandbox-unit"></select>
+        </label>
+
+        <label>Nombre
+          <input id="sandbox-count" type="number" min="1" max="20" value="1" />
+        </label>
+
+        <div class="row">
+          <button type="button" id="spawn-saphir" class="saphir">Saphir</button>
+          <button type="button" id="spawn-rubis" class="rubis">Rubis</button>
+        </div>
+        <p class="hint">Apparition au centre de l'écran, sans coût ni population.</p>
+
+        <div class="row">
+          <button type="button" id="cheat-resources">+500 de chaque</button>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="toggle-ai" checked /> IA Rubis active</label>
+        </div>
+
+        <h2>Commandes</h2>
+        <ul class="help">
+          <li><b>Clic gauche</b> sélectionner, glisser pour un groupe</li>
+          <li><b>Clic droit</b> déplacer, récolter, attaquer, bâtir</li>
+          <li><b>ZQSD / flèches</b> déplacer la vue</li>
+          <li><b>Molette</b> zoom · <b>Échap</b> annuler</li>
+        </ul>
+      </aside>
+
+      <footer id="bottom">
+        <section id="selection-panel"></section>
+        <section id="actions-panel"></section>
+      </footer>
+
+      <div id="log"></div>
+      <div id="banner" hidden></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

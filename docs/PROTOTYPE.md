@@ -1,0 +1,144 @@
+# Prototype jouable — v0.1
+
+Première version jouable, destinée à éprouver l'équilibrage en conditions
+réelles plutôt qu'à ressembler au jeu final.
+
+```bash
+npm install
+npm run dev     # http://localhost:5173
+```
+
+---
+
+## Ce qui marche
+
+**La boucle complète du GDD §4.** Récolter, construire, produire, passer d'âge,
+combattre. Une partie se joue du début à la fin, victoire comprise (destruction
+totale de l'adversaire, GDD §8).
+
+- **Carte isométrique** de 64 × 64 tuiles, générée à partir d'une graine : deux
+  bases opposées, dotation de départ identique, ressources neutres au centre
+  pour donner un enjeu à l'expansion.
+- **Sélection** au clic ou au rectangle, **ordres contextuels** au clic droit —
+  la cible détermine l'action (marcher, récolter, bâtir, attaquer).
+- **Récolte** des quatre ressources, avec dépôt automatique au bâtiment le plus
+  proche et retour sur le gisement.
+- **Construction** des dix bâtiments, avec aperçu de l'emplacement et chantier
+  destructible pendant qu'il se bâtit.
+- **Production** d'unités en file d'attente, avec point de ralliement.
+- **Progression d'âge**, y compris ses prérequis en bâtiments.
+- **Combat** complet : bonus de classe, charge de la cavalerie, aura du
+  porte-étendard, tours de garde, riposte automatique des unités au repos.
+- **IA d'escarmouche** pour le Royaume de Rubis. Elle ne triche pas : mêmes
+  coûts, mêmes délais, mêmes ressources de départ. Elle récolte, construit,
+  monte d'âge et lance un assaut toutes les trois minutes.
+
+**Le bac à sable**, à droite de l'écran, est l'outil qui justifie ce prototype :
+faire apparaître n'importe quelle unité dans n'importe quel camp, sans coût ni
+population, et regarder ce qui se passe. Avec le réglage de vitesse (jusqu'à
+×8) et les ressources gratuites, une hypothèse d'équilibrage se teste en
+quelques secondes au lieu d'une partie entière.
+
+Les chiffres viennent tous de `src/data` : **modifier une valeur dans les
+tables change immédiatement le jeu**, sans toucher à une ligne de code.
+
+---
+
+## Ce qui manque
+
+Par ordre d'importance pour la suite :
+
+1. **Aucun graphisme.** Tout est en formes géométriques, sur la palette chaude
+   du GDD §10. Les sprites viendront avec le moodboard.
+2. **Pas de brouillard de guerre.** La carte entière est visible. Ça change
+   beaucoup le jeu — l'IA comme le joueur voient tout — et c'est le prochain
+   grand chantier de gameplay.
+3. **Pas de multijoueur.** La simulation est déterministe et prête pour du
+   lockstep (voir plus bas), mais il n'y a ni réseau ni serveur.
+4. **Pas d'arbre technologique.** La forge se construit mais ne propose aucune
+   amélioration.
+5. **Projectiles instantanés.** Les flèches touchent au moment du tir, sans
+   temps de vol. Ça avantage légèrement les archers par rapport au modèle.
+6. **Pas de son.**
+
+Limites connues du prototype, moins graves mais réelles :
+
+- Les unités se poussent doucement sans vraie gestion de collisions : elles
+  peuvent s'empiler dans un goulet. Le déplacement de groupe ne se bloque
+  jamais, mais la formation n'est pas propre.
+- Chaque unité calcule son chemin dans son coin. À une centaine d'unités ça
+  tient sans peine ; à plusieurs centaines, il faudra un champ de flux.
+- Pas de file d'ordres (pas de « va ici *puis* là »).
+- La ferme s'épuise et disparaît, mais rien ne prévient le joueur avant.
+
+---
+
+## Architecture
+
+```
+src/
+  data/     Tables d'équilibrage — aucune logique
+  balance/  Modèle de combat, analyse, rapport
+  sim/      Simulation : monde, grille, ordres, IA, boucle
+  render/   Rendu PixiJS — lit le monde, ne le modifie jamais
+  ui/       HUD en HTML
+  main.ts   Assemblage et boucle principale
+```
+
+Deux règles structurent tout le reste.
+
+**La simulation ne connaît pas l'affichage.** Elle ne référence ni PixiJS ni le
+DOM, ce qui permet aux tests de jouer des parties entières en quelques
+secondes — dont une de quinze minutes contre l'IA, à chaque exécution de
+`npm test`. C'est aussi ce qui permettra à un serveur de simuler sans rien
+afficher.
+
+**Tout est déterministe.** Aucun `Math.random` (un générateur à graine le
+remplace partout), aucune dépendance à l'horloge système, un pas de simulation
+fixe à 20 Hz que la vitesse de jeu ne modifie jamais — accélérer exécute plus
+de pas, jamais des pas plus grands. Un test rejoue dix minutes de partie deux
+fois et compare l'état entité par entité.
+
+C'est le prérequis du multijoueur 4v4 du GDD §9 : en lockstep, seuls les ordres
+transitent sur le réseau et chaque client simule le reste à l'identique. Le
+moindre écart de calcul entre deux machines fait diverger la partie.
+
+---
+
+## Tests
+
+```bash
+npm test                  # 50 vérifications, dont 12 de simulation
+npm run balance           # rapport d'équilibrage
+npm run typecheck
+node scripts/smoke.mjs    # parcours complet dans un vrai navigateur
+```
+
+Le test de bout en bout pilote la souris comme un joueur et vérifie ce
+qu'aucun test headless ne peut voir : rendu, entrées et HUD. Il a besoin de
+`npm run dev` en parallèle, et accepte un dossier de captures en second
+argument.
+
+Deux bugs ont été trouvés par ces tests plutôt qu'en jouant :
+
+- Les unités s'immobilisaient **juste** hors de portée de leur cible sans
+  jamais rien faire — le test d'arrivée portait sur un point d'approche mobile
+  au lieu de la distance réelle à la cible.
+- Un paysan envoyé sur un arbre au cœur d'une forêt restait bloqué
+  indéfiniment : aucune case libre autour, donc aucune position d'où le
+  couper. Les unités abandonnent maintenant une cible inatteignable au bout de
+  trois secondes et en choisissent une autre.
+
+---
+
+## Commandes en jeu
+
+| Action | Commande |
+|---|---|
+| Sélectionner | Clic gauche, ou glisser pour un groupe |
+| Ajouter à la sélection | Maj + clic |
+| Ordre contextuel | Clic droit |
+| Point de ralliement | Bâtiment sélectionné + clic droit |
+| Déplacer la vue | ZQSD, flèches, ou glisser au clic molette |
+| Zoom | Molette |
+| Annuler | Échap |
