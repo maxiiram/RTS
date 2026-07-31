@@ -78,6 +78,7 @@ const COUNTERS: Array<{
 }> = [
   { winner: 'cavalier_lance', loser: 'archer' },
   { winner: 'chevalier_lance', loser: 'cavalier_lance' },
+  { winner: 'chevalier_lance', loser: 'chevalier' },
   { winner: 'chevalier_armure', loser: 'archer', hardCounter: true },
   { winner: 'chevalier_armure', loser: 'soldat' },
   { winner: 'chevalier', loser: 'chevalier_armure' },
@@ -100,6 +101,52 @@ describe('contre-systèmes (GDD §6)', () => {
       }
     });
   }
+
+  it("l'allonge de la lance lui donne le premier coup au corps-à-corps", () => {
+    // Le chevalier à la lance frappe à 1.4 tuile contre 0.6 en mêlée standard.
+    // Concrètement, l'adversaire doit franchir 0.8 tuile de plus avant de
+    // pouvoir riposter — c'est le seul avantage qu'une allonge procure en
+    // mêlée, et il vaut environ un coup gratuit par engagement.
+    const lance = unit('chevalier_lance');
+
+    for (const opponent of ['chevalier', 'soldat', 'chevalier_armure']) {
+      const result = simulateDuel(lance, unit(opponent));
+      strictEqual(
+        result.firstStriker,
+        'a',
+        `la lance ne frappe pas en premier contre ${opponent} malgré son allonge`,
+      );
+      ok(
+        result.openingAdvantage > 0,
+        `l'allonge de la lance ne lui rapporte aucun temps d'avance contre ${opponent}`,
+      );
+    }
+  });
+
+  it("l'allonge seule ne suffit pas à renverser un duel", () => {
+    // Garde-fou contre une conclusion trop optimiste : rallonger la portée
+    // d'une unité de mêlée ne change quasiment rien à l'issue du combat.
+    // Ce qui fait gagner la lance contre le chevalier, c'est son bonus
+    // anti-cavalerie — l'allonge ne fait qu'offrir le premier coup.
+    const lance = unit('chevalier_lance');
+    const sansBonus: UnitDef = {
+      ...lance,
+      combat: { ...lance.combat!, bonusDamage: {} },
+    };
+
+    const result = simulateDuel(sansBonus, unit('chevalier'));
+    strictEqual(
+      result.firstStriker,
+      'a',
+      "sans son bonus, la lance garde pourtant l'avantage du premier coup",
+    );
+    strictEqual(
+      result.winner,
+      'b',
+      'la lance privée de son bonus anti-cavalerie bat quand même le chevalier : ' +
+        'le modèle donne beaucoup trop de poids à la portée en mêlée',
+    );
+  });
 
   it("l'archer perd au corps-à-corps mais gagne du temps à distance", () => {
     // Le GDD veut un archer fort à distance et fragile une fois engagé. On le

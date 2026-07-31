@@ -6,7 +6,7 @@ choix, il ne fait pas autorité sur les valeurs** — le code est la source de
 vérité, et il est vérifié par `npm test`.
 
 ```bash
-npm test        # 35 vérifications d'intégrité et d'équilibrage
+npm test        # 38 vérifications d'intégrité et d'équilibrage
 npm run balance # rapport complet : duels, rendements, rythme de partie
 npm run typecheck
 ```
@@ -95,17 +95,22 @@ et ses 5 secondes de production supplémentaires.
 | Soldat | 2 | 65 N 25 B | 90 | 24 s | 75 | 9 | 1 | 1,00 | 0,6 |
 | Archer | 2 | 40 B 25 O | 84 | 26 s | 45 | 8 | 0 | 1,00 | **5,0** |
 | Cavalier à lance | 2 | 80 N 30 O | 133 | 30 s | 90 | 7 | 1 | **1,80** | 0,6 |
-| Chevalier | 3 | 80 N 50 O | 168 | 32 s | 100 | **15** | 2 | 1,00 | 0,6 |
+| Chevalier *(cavalerie)* | 3 | 80 N 50 O | 168 | 32 s | 100 | **15** | 2 | 1,00 | 0,6 |
 | Chevalier en armure | 3 | 75 N 50 O | 163 | 38 s | 130 | 7 | **5** | 0,85 | 0,6 |
-| Chevalier à la lance | 3 | 45 N 40 B 20 O | 120 | 28 s | 80 | 7 | 2 | 1,00 | 0,5 |
+| Chevalier à la lance | 3 | 45 N 40 B 20 O | 120 | 28 s | 80 | 7 | 2 | 1,00 | **1,4** |
 | Chevalier porte-étendard | 3 | 250 N 300 O | 775 | 90 s | 180 | 18 | 5 | 1,50 | 0,6 |
 
 Capacités particulières :
 
 - **Cavalier à lance** — charge : +8 dégâts au premier coup après 4 tuiles
   parcourues sans s'arrêter, rechargeable toutes les 12 s.
-- **Chevalier à la lance** — +10 dégâts contre la classe `cavalry`. Soit
-  **16 dégâts sur un cavalier contre 6 sur un soldat** : le contre est assez
+- **Chevalier** — classé `cavalry` : c'est un chevalier monté, et c'est ce qui
+  le rend vulnérable au chevalier à la lance (voir §3). Sa vitesse reste celle
+  d'un fantassin, conformément à sa note du GDD : cavalerie lourde de ligne,
+  pas cavalier de raid.
+- **Chevalier à la lance** — +16 dégâts contre la classe `cavalry`, et une
+  allonge de 1,4 tuile là où la mêlée standard frappe à 0,6. Soit
+  **22 dégâts sur un cavalier contre 6 sur un soldat** : le contre est assez
   net pour être lisible sans lire une infobulle.
 - **Chevalier porte-étendard** — charge +10, aura de +2 attaque et +1 armure
   sur 6 tuiles, **1 seul exemplaire par joueur**, 3 de population.
@@ -134,7 +139,8 @@ de DPS.
 | Contre annoncé au GDD §6 | Durée | PV restants au vainqueur |
 |---|---|---|
 | Cavalier à lance > Archer | 15 s | 46 % |
-| Chevalier à la lance > Cavalier à lance | 13 s | 59 % |
+| Chevalier à la lance > Cavalier à lance | 10 s | 65 % |
+| Chevalier à la lance > Chevalier | 11 s | 35 % |
 | Chevalier en armure > Archer | 19 s | 82 % |
 | Chevalier en armure > Soldat | 28 s | 60 % |
 | Chevalier > Chevalier en armure | 28 s | 35 % |
@@ -149,6 +155,24 @@ personne ne la produit plus, et elle disparaît du jeu. La fourchette visée est
 Une seule exception assumée, marquée `hardCounter` dans les tests : le
 chevalier en armure contre l'archer (82 %). C'est précisément sa raison d'être
 — absorber les flèches — et l'archer garde son rôle contre tout le reste.
+
+### Ce que l'allonge apporte réellement
+
+Le chevalier à la lance frappe à 1,4 tuile ; son adversaire de mêlée doit donc
+franchir 0,8 tuile de plus avant de riposter. Le simulateur mesure cette avance :
+**0,75 seconde**, soit un coup gratuit par engagement. Contre le chevalier, le
+soldat ou le chevalier en armure, la lance frappe toujours la première.
+
+C'est agréable, et c'est tout. Une unité de mêlée ne recule pas pour maintenir
+sa distance : l'allonge donne l'ouverture, pas un avantage continu. La mesure
+est sans appel — en portant la portée de la lance jusqu'à 2,5 tuiles sans rien
+changer d'autre, **le chevalier gagnait encore le duel avec 65 % de ses PV**.
+
+Ce qui bat le chevalier, c'est le bonus anti-cavalerie, qui ne s'applique que
+parce que le chevalier est désormais classé `cavalry`. Un test dédié verrouille
+cette distinction : privée de son bonus, la lance conserve le premier coup et
+perd quand même. Si ce test venait à échouer, c'est que le modèle s'est mis à
+donner beaucoup trop de poids à la portée en mêlée.
 
 **Ce que ces duels ne disent pas.** Aucune micro-gestion n'est simulée : les
 archers ne reculent pas en tirant. Leurs résultats sont donc un *plancher*,
@@ -218,36 +242,30 @@ simultanés dans un navigateur imposent de tenir le nombre d'entités.
 
 Ce qui reste à trancher, par ordre d'impact :
 
-1. **Le chevalier n'a pas de contre de classe.** Il gagne tous ses duels sauf
-   contre le porte-étendard. C'est cohérent avec le GDD (« meilleure version du
-   soldat », classé `infantry`), mais ça laisse l'âge 3 sans triangle : le
-   chevalier à la lance ne contre que la cavalerie, et le chevalier n'en est
-   pas. Deux issues possibles — le classer `cavalry` (il est nommé chevalier,
-   après tout, et ça donnerait enfin une cible de choix à la lance), ou
-   accepter qu'il soit l'unité chère et polyvalente que l'on contre par le
-   nombre et non par la classe. À trancher en playtest.
+1. **Le GDD décrit le chevalier comme de l'infanterie et sa lance comme ayant
+   une portée réduite.** Les deux ont été inversés pour que le chevalier à la
+   lance puisse le contrer : le chevalier est monté (`cavalry`), et la lance a
+   l'allonge (1,4 tuile). Sans ce changement de classe, aucune unité du roster
+   n'avait de quoi menacer le chevalier, qui gagnait tous ses duels. **Le GDD
+   §6 mérite d'être mis à jour en conséquence**, ou la décision inversée si le
+   chevalier doit rester un fantassin — auquel cas il faudra lui trouver un
+   autre contre.
 
-2. **La portée « réduite » du chevalier à la lance.** Le GDD la décrit ainsi,
-   et elle est implémentée telle quelle (0,5 tuile contre 0,6 en mêlée
-   standard). C'est contre-intuitif : une lance sert justement à tenir la
-   cavalerie *à distance*. Une portée supérieure (1,2 tuile) serait plus
-   lisible et renforcerait son rôle sans toucher aux dégâts.
-
-3. **L'archer est l'unité la moins rentable par ressource investie** (1,95
+2. **L'archer est l'unité la moins rentable par ressource investie** (1,95
    contre 4,17 pour le soldat). C'est attendu — l'indicateur ne mesure ni la
    portée, ni la sécurité, ni le fait qu'un groupe d'archers concentre ses tirs
    là où une mêlée s'étale — mais c'est à surveiller au premier playtest de
    masse. S'il est décevant en nombre, la cadence est le premier levier.
 
-4. **La forge n'a pas encore d'améliorations.** L'arbre technologique reste
+3. **La forge n'a pas encore d'améliorations.** L'arbre technologique reste
    entièrement à concevoir (GDD §13). Les tables de données sont prêtes à
    l'accueillir.
 
-5. **Aucune unité de siège.** Le GDD n'en prévoit pas, mais avec un centre-ville
+4. **Aucune unité de siège.** Le GDD n'en prévoit pas, mais avec un centre-ville
    à 2000 PV et des murailles à 800, une armée sans siège finira par buter sur
    une base bien fortifiée. À reconsidérer si les parties se figent.
 
-6. **Les deux royaumes sont identiques** (GDD §3), ce qui est assumé pour la
+5. **Les deux royaumes sont identiques** (GDD §3), ce qui est assumé pour la
    v1. Rien dans les données n'empêche d'ajouter des variantes par faction plus
    tard : il suffira d'un champ `faction` sur les unités concernées.
 

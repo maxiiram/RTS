@@ -104,6 +104,15 @@ export interface DuelResult {
   winnerHp: number;
   /** Part des PV du vainqueur encore intacts, entre 0 et 1. */
   winnerHpRatio: number;
+  /** Qui touche en premier — c'est là que l'allonge se mesure. */
+  firstStriker: 'a' | 'b' | 'draw';
+  /**
+   * Avance (s) du premier tireur sur la riposte adverse. C'est tout ce
+   * qu'une allonge supérieure rapporte au corps-à-corps : le temps que
+   * l'adversaire met à franchir l'écart de portée, soit en général de quoi
+   * placer un coup gratuit, pas davantage.
+   */
+  openingAdvantage: number;
 }
 
 interface DuelState {
@@ -155,6 +164,21 @@ export function simulateDuel(
   const b = initState(unitB, startDistance);
 
   let elapsed = 0;
+  let firstHitA: number | null = null;
+  let firstHitB: number | null = null;
+
+  const opening = (): Pick<DuelResult, 'firstStriker' | 'openingAdvantage'> => {
+    if (firstHitA === null && firstHitB === null) {
+      return { firstStriker: 'draw', openingAdvantage: 0 };
+    }
+    if (firstHitB === null) return { firstStriker: 'a', openingAdvantage: 0 };
+    if (firstHitA === null) return { firstStriker: 'b', openingAdvantage: 0 };
+    if (firstHitA === firstHitB) return { firstStriker: 'draw', openingAdvantage: 0 };
+    return {
+      firstStriker: firstHitA < firstHitB ? 'a' : 'b',
+      openingAdvantage: round(Math.abs(firstHitB - firstHitA), 2),
+    };
+  };
 
   while (elapsed < maxSeconds) {
     const distance = Math.abs(b.position - a.position);
@@ -165,6 +189,9 @@ export function simulateDuel(
     const damageToB = resolveAttack(a, b, distance, dt);
     const damageToA = resolveAttack(b, a, distance, dt);
 
+    if (damageToB > 0 && firstHitA === null) firstHitA = elapsed;
+    if (damageToA > 0 && firstHitB === null) firstHitB = elapsed;
+
     a.hp -= damageToA;
     b.hp -= damageToB;
 
@@ -173,7 +200,7 @@ export function simulateDuel(
     if (a.hp <= 0 || b.hp <= 0) {
       const seconds = round(elapsed, 2);
       if (a.hp <= 0 && b.hp <= 0) {
-        return { winner: 'draw', seconds, winnerHp: 0, winnerHpRatio: 0 };
+        return { winner: 'draw', seconds, winnerHp: 0, winnerHpRatio: 0, ...opening() };
       }
       const winner = a.hp > 0 ? 'a' : 'b';
       const winnerHp = Math.max(a.hp, b.hp);
@@ -183,11 +210,12 @@ export function simulateDuel(
         seconds,
         winnerHp: round(winnerHp, 1),
         winnerHpRatio: round(winnerHp / winnerUnit.hp, 3),
+        ...opening(),
       };
     }
   }
 
-  return { winner: 'draw', seconds: maxSeconds, winnerHp: 0, winnerHpRatio: 0 };
+  return { winner: 'draw', seconds: maxSeconds, winnerHp: 0, winnerHpRatio: 0, ...opening() };
 }
 
 /**

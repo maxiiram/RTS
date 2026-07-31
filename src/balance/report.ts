@@ -170,6 +170,7 @@ interface CounterCheck {
 const COUNTERS: CounterCheck[] = [
   { label: 'Cavalier à lance > Archer', winner: 'cavalier_lance', loser: 'archer' },
   { label: 'Chevalier à la lance > Cavalier à lance', winner: 'chevalier_lance', loser: 'cavalier_lance' },
+  { label: 'Chevalier à la lance > Chevalier', winner: 'chevalier_lance', loser: 'chevalier' },
   { label: 'Chevalier en armure > Archer', winner: 'chevalier_armure', loser: 'archer' },
   { label: 'Chevalier en armure > Soldat', winner: 'chevalier_armure', loser: 'soldat' },
   { label: 'Chevalier > Chevalier en armure (dégât brut)', winner: 'chevalier', loser: 'chevalier_armure' },
@@ -208,6 +209,28 @@ function counterChecks(): void {
     `\nSpécialisation de la lance : ${damagePerHit(spear, cav)} dégâts sur un cavalier ` +
       `contre ${damagePerHit(spear, soldier)} sur un soldat.`,
   );
+
+  // L'allonge du chevalier à la lance : ce qu'elle rapporte réellement.
+  const reachRows = ['chevalier', 'soldat', 'chevalier_armure'].map((id) => {
+    const opponent = UNITS[id] as UnitDef;
+    const result = simulateDuel(spear, opponent);
+    return [
+      opponent.nameFr,
+      n(opponent.combat?.range ?? 0, 1),
+      result.firstStriker === 'a' ? 'la lance' : opponent.nameFr,
+      `${n(result.openingAdvantage, 2)}s`,
+    ];
+  });
+
+  title("3b. Ce que rapporte l'allonge de la lance (portée 1.4)");
+  console.log(table(['Face à', 'Sa portée', 'Frappe en premier', 'Avance'], reachRows));
+  console.log(
+    "\nL'allonge offre un coup gratuit par engagement, rien de plus : une unité de mêlée",
+  );
+  console.log(
+    "ne recule pas pour maintenir sa distance. Ce qui bat le chevalier, c'est le bonus",
+  );
+  console.log('anti-cavalerie ; sans lui, la lance perd malgré le premier coup (test dédié).');
 }
 
 // ───────────────────────────────────────────────────────────────────────────

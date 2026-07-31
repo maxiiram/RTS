@@ -218,7 +218,13 @@ export const UNITS: Record<string, UnitDef> = {
   chevalier: {
     id: 'chevalier',
     nameFr: 'Chevalier',
-    class: 'infantry',
+    // Monté, donc classé `cavalry` : c'est ce qui le rend vulnérable au
+    // chevalier à la lance et referme le triangle de contres à l'âge 3.
+    // Classé `infantry`, il gagnait tous ses duels sans exception, aucune
+    // unité du roster n'ayant de quoi le menacer.
+    // Sa vitesse reste celle d'un fantassin (note 4 au GDD) : c'est une
+    // cavalerie lourde de ligne, pas un cavalier de raid.
+    class: 'cavalry',
     role: 'military',
     age: 3,
     trainedAt: 'caserne',
@@ -272,14 +278,20 @@ export const UNITS: Record<string, UnitDef> = {
     popCost: 1,
     cost: { food: 45, wood: 40, gold: 20 },
     trainTime: 28,
-    // Anti-cavalerie dédié : dégâts bruts faibles, mais +10 contre la classe
-    // `cavalry`. Le GDD lui donne une portée « réduite » — on la prend au mot
-    // (0.5 tuile), ce qui l'oblige à être vraiment au contact.
+    // Anti-cavalerie dédié : dégâts bruts faibles (7, soit moins qu'un
+    // soldat), mais +16 contre la classe `cavalry`. Soit 23 contre un cheval
+    // et 7 contre tout le reste — un écart assez énorme pour être lisible
+    // sans lire une infobulle.
+    //
+    // L'allonge de 1.4 tuile lui donne le premier coup contre toute unité de
+    // mêlée : l'adversaire doit franchir 0.8 tuile de plus avant de riposter.
+    // C'est un coup gratuit par engagement, pas un avantage continu — un
+    // fantassin ne recule pas pour maintenir sa distance.
     combat: {
       attack: 7,
       attackCooldown: 2.0,
-      range: 0.5,
-      bonusDamage: { cavalry: 10 },
+      range: 1.4,
+      bonusDamage: { cavalry: 16 },
     },
   },
 
