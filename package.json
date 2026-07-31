@@ -1,0 +1,19 @@
+{
+  "name": "projet-rts",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "RTS pixel art medieval — Royaume de Saphir vs Royaume de Rubis",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "balance": "node src/balance/report.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.7.2"
+  }
+}
