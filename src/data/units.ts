@@ -23,6 +23,15 @@ import type { UnitDef } from './types.ts';
  * Les cooldowns d'attaque sont longs (2 s et plus) : c'est ce qui donne au
  * combat son rythme « lent », des batailles qui durent et où repositionner
  * ses unités a le temps d'avoir un effet.
+ *
+ * === Vitesses ===
+ *
+ * Les vitesses sont en tuiles par seconde. Le « rythme lent » du GDD §4 est
+ * porté par la durée des batailles et la longueur de la phase économique, pas
+ * par des unités qui traînent : marcher lentement n'est pas stratégique, c'est
+ * juste ennuyeux. L'échelle absolue a donc été relevée après le premier
+ * essai manette en main ; les rapports entre unités, eux, respectent toujours
+ * les notes du GDD §6.
  */
 export const UNITS: Record<string, UnitDef> = {
   // ─────────────────────────────────────────────────────────────────────────
@@ -39,7 +48,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 3, damage: 1, speed: 4, armor: 1 },
     hp: 40,
     armor: 0,
-    speed: 1.0,
+    speed: 1.7,
     los: 6,
     popCost: 1,
     cost: { food: 50 },
@@ -65,7 +74,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 3, damage: 1, speed: 4, armor: 1 },
     hp: 40,
     armor: 0,
-    speed: 1.0,
+    speed: 1.7,
     los: 6,
     popCost: 1,
     cost: { food: 60, wood: 40 },
@@ -87,7 +96,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 3, damage: 1, speed: 4, armor: 1 },
     hp: 40,
     armor: 0,
-    speed: 1.0,
+    speed: 1.7,
     los: 6,
     popCost: 1,
     cost: { food: 60, wood: 40 },
@@ -106,7 +115,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 3, damage: 1, speed: 4, armor: 1 },
     hp: 40,
     armor: 0,
-    speed: 1.0,
+    speed: 1.7,
     los: 6,
     popCost: 1,
     cost: { food: 70, wood: 40 },
@@ -130,7 +139,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 4, damage: 3, speed: 4, armor: 2 },
     hp: 55,
     armor: 1,
-    speed: 1.0,
+    speed: 1.7,
     los: 7,
     popCost: 1,
     cost: { food: 60, wood: 20 },
@@ -152,7 +161,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 5, damage: 4, speed: 4, armor: 2 },
     hp: 75,
     armor: 1,
-    speed: 1.0,
+    speed: 1.7,
     los: 7,
     popCost: 1,
     cost: { food: 65, wood: 25 },
@@ -170,7 +179,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 3, damage: 4, speed: 4, armor: 1 },
     hp: 45,
     armor: 0,
-    speed: 1.0,
+    speed: 1.7,
     los: 9,
     popCost: 1,
     cost: { wood: 40, gold: 25 },
@@ -195,7 +204,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 6, damage: 3, speed: 8, armor: 2 },
     hp: 90,
     armor: 1,
-    speed: 1.8,
+    speed: 3.05,
     los: 8,
     popCost: 1,
     cost: { food: 80, gold: 30 },
@@ -231,7 +240,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 6, damage: 5, speed: 4, armor: 3 },
     hp: 100,
     armor: 2,
-    speed: 1.0,
+    speed: 1.7,
     los: 7,
     popCost: 1,
     cost: { food: 80, gold: 50 },
@@ -251,7 +260,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 7, damage: 3, speed: 3, armor: 6 },
     hp: 130,
     armor: 5,
-    speed: 0.85,
+    speed: 1.45,
     los: 7,
     popCost: 1,
     // Moins cher que le chevalier : c'est un spécialiste défensif, pas un
@@ -273,7 +282,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 5, damage: 3, speed: 4, armor: 3 },
     hp: 80,
     armor: 2,
-    speed: 1.0,
+    speed: 1.7,
     los: 7,
     popCost: 1,
     cost: { food: 45, wood: 40, gold: 20 },
@@ -305,7 +314,7 @@ export const UNITS: Record<string, UnitDef> = {
     gddRank: { hp: 9, damage: 7, speed: 6, armor: 6 },
     hp: 180,
     armor: 5,
-    speed: 1.5,
+    speed: 2.55,
     los: 10,
     popCost: 3,
     cost: { food: 250, gold: 300 },

@@ -396,6 +396,58 @@ export function recomputePopulation(world: World): void {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Ce que fait une unité, en un mot
+// ───────────────────────────────────────────────────────────────────────────
+
+export type ActionKind = 'idle' | 'move' | 'gather' | 'return' | 'build' | 'attack';
+
+/**
+ * Action en cours d'une unité, telle qu'on veut la montrer au joueur.
+ *
+ * L'ordre interne ne suffit pas : un paysan « en récolte » fait en réalité
+ * deux choses très différentes selon qu'il coupe du bois ou qu'il rapporte sa
+ * charge, et c'est justement la distinction que le joueur a besoin de voir
+ * pour comprendre pourquoi son économie avance ou pas.
+ */
+export function currentAction(unit: Entity): ActionKind {
+  switch (unit.order.kind) {
+    case 'gather': {
+      const carrying = unit.carrying;
+      if (carrying && carrying.amount >= RESOURCES[carrying.resource].carryCapacity) {
+        return 'return';
+      }
+      return 'gather';
+    }
+    case 'attack':
+      return 'attack';
+    case 'build':
+      return 'build';
+    case 'move':
+      return 'move';
+    default:
+      return 'idle';
+  }
+}
+
+const ACTION_LABELS: Record<ActionKind, string> = {
+  idle: 'Au repos',
+  move: 'Se déplace',
+  gather: 'Récolte',
+  return: 'Rapporte au dépôt',
+  build: 'Construit',
+  attack: 'Attaque',
+};
+
+/** Libellé lisible de l'action, ressource comprise pour la récolte. */
+export function actionLabel(unit: Entity): string {
+  const action = currentAction(unit);
+  if (action === 'gather' && unit.carrying) {
+    return `Récolte : ${RESOURCES[unit.carrying.resource].nameFr.toLowerCase()}`;
+  }
+  return ACTION_LABELS[action];
+}
+
 export function logEvent(world: World, message: string): void {
   world.log.push(message);
   if (world.log.length > 40) world.log.shift();

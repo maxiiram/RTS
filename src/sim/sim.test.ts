@@ -12,7 +12,7 @@ import { describe, it } from 'node:test';
 import { SIM_TICK_SECONDS } from '../data/constants.ts';
 import { UNITS } from '../data/units.ts';
 import { createAi, stepAi } from './ai.ts';
-import { orderGather, orderMove, sandboxSpawn, train } from './commands.ts';
+import { orderGather, orderGroup, orderMove, sandboxSpawn, train } from './commands.ts';
 import { findPath } from './grid.ts';
 import { stepWorld } from './sim.ts';
 import type { Entity, World } from './types.ts';
@@ -124,6 +124,98 @@ describe('économie', () => {
       total <= expected + 0.5,
       `récolte observée ${total.toFixed(1)} supérieure au taux théorique ${expected.toFixed(1)}`,
     );
+  });
+});
+
+describe('ordres de groupe', () => {
+  it('répartit les récolteurs sur le bosquet et pas sur le seul arbre cliqué', () => {
+    const world = createWorld();
+    const villagers = unitsOf(world, 0);
+    for (let i = 0; i < 6; i++) villagers.push(spawnUnit(world, 'paysan', 0, 12 + i * 0.5, 16));
+
+    const tree = findNearest(world, villagers[0] as Entity, (e) =>
+      isHarvestable(e, 0) && e.resource === 'wood',
+    );
+    ok(tree);
+
+    orderGroup(world, villagers, tree, tree.x, tree.y);
+
+    const targets = new Set(villagers.map((v) => v.order.targetId));
+    ok(
+      targets.size >= 3,
+      `les ${villagers.length} paysans se partagent seulement ${targets.size} arbre(s)`,
+    );
+    for (const villager of villagers) {
+      const node = world.entities.get(villager.order.targetId ?? -1);
+      strictEqual(node?.resource, 'wood', 'un paysan a été envoyé sur autre chose que du bois');
+    }
+  });
+
+  it('envoie les soldats sur la troupe ennemie, pas sur le seul défenseur visé', () => {
+    const world = createWorld();
+    const soldiers = sandboxSpawn(world, 'soldat', 0, 40, 40, 5);
+    const enemies = sandboxSpawn(world, 'paysan', 1, 43, 40, 4);
+    const aimedAt = enemies[0] as Entity;
+
+    orderGroup(world, soldiers, aimedAt, aimedAt.x, aimedAt.y);
+
+    const targets = new Set(soldiers.map((s) => s.order.targetId));
+    ok(
+      targets.size >= 2,
+      `les 5 soldats font tous la queue derrière la même cible (${targets.size} cible)`,
+    );
+    for (const soldier of soldiers) {
+      const target = world.entities.get(soldier.order.targetId ?? -1);
+      strictEqual(target?.owner, 1, 'un soldat vise autre chose qu\'un ennemi');
+    }
+  });
+
+  it('déploie le groupe en formation au lieu de l\'entasser sur un point', () => {
+    const world = createWorld();
+    const soldiers = sandboxSpawn(world, 'soldat', 0, 20, 20, 9);
+
+    orderGroup(world, soldiers, null, 32, 32);
+
+    const destinations = new Set(soldiers.map((s) => `${s.order.x.toFixed(2)},${s.order.y.toFixed(2)}`));
+    strictEqual(destinations.size, 9, 'plusieurs unités visent exactement la même case');
+
+    for (const soldier of soldiers) {
+      const spread = Math.hypot(soldier.order.x - 32, soldier.order.y - 32);
+      ok(spread < 4, `un emplacement de formation est à ${spread.toFixed(1)} tuiles du point visé`);
+    }
+  });
+
+  it('reste déterministe : même sélection, même répartition', () => {
+    const signature = (): string => {
+      const world = createWorld(99);
+      const villagers = unitsOf(world, 0);
+      const tree = findNearest(world, villagers[0] as Entity, (e) =>
+        isHarvestable(e, 0) && e.resource === 'wood',
+      );
+      ok(tree);
+      // Sélection donnée dans le désordre : la répartition ne doit pas en dépendre.
+      orderGroup(world, [...villagers].reverse(), tree, tree.x, tree.y);
+      return villagers.map((v) => `${v.id}:${v.order.targetId}`).join('|');
+    };
+
+    strictEqual(signature(), signature());
+  });
+});
+
+describe('confort de jeu', () => {
+  it('un paysan traverse une longue distance sans lasser le joueur', () => {
+    // Garde-fou de rythme : le « lent et stratégique » du GDD porte sur la
+    // durée des batailles et de la phase économique, pas sur des unités qui
+    // mettent une éternité à traverser la carte.
+    const world = createWorld();
+    const villager = unitsOf(world, 0)[0] as Entity;
+    const start = { x: villager.x, y: villager.y };
+
+    orderMove(villager, start.x + 20, start.y);
+    run(world, 20);
+
+    const travelled = Math.hypot(villager.x - start.x, villager.y - start.y);
+    ok(travelled > 15, `le paysan n'a parcouru que ${travelled.toFixed(1)} tuiles en 20 secondes`);
   });
 });
 

@@ -6,7 +6,7 @@ choix, il ne fait pas autorité sur les valeurs** — le code est la source de
 vérité, et il est vérifié par `npm test`.
 
 ```bash
-npm test        # 38 vérifications d'intégrité et d'équilibrage
+npm test        # 55 vérifications d'intégrité et d'équilibrage
 npm run balance # rapport complet : duels, rendements, rythme de partie
 npm run typecheck
 ```
@@ -114,6 +114,20 @@ Capacités particulières :
   net pour être lisible sans lire une infobulle.
 - **Chevalier porte-étendard** — charge +10, aura de +2 attaque et +1 armure
   sur 6 tuiles, **1 seul exemplaire par joueur**, 3 de population.
+
+### Vitesses
+
+Les vitesses ont été relevées d'un facteur 1,7 après le premier essai manette
+en main : les unités étaient jugées trop lentes, et à raison. Le « rythme lent
+et stratégique » du GDD §4 tient à la durée des batailles et à la longueur de
+la phase économique — marcher lentement n'est pas stratégique, c'est
+simplement ennuyeux.
+
+Les rapports entre unités n'ont pas bougé et tous les contres tiennent. Un seul
+effet secondaire mesurable : la cavalerie franchissant plus vite la zone de tir,
+l'archer place un projectile de moins pendant l'approche, ce qui fait passer la
+marge du cavalier de 46 à 53 % de PV restants. C'est encore dans la fourchette
+visée, mais c'est à surveiller si les archers déçoivent au playtest.
 
 ### Fidélité aux notes du GDD
 

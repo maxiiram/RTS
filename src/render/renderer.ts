@@ -13,7 +13,8 @@ import { TILE_HEIGHT, TILE_WIDTH } from '../data/constants.ts';
 import { UNITS } from '../data/units.ts';
 import { tileToScreen } from '../sim/grid.ts';
 import type { Entity, World } from '../sim/types.ts';
-import { PALETTE } from './palette.ts';
+import { currentAction } from '../sim/world.ts';
+import { ACTION_COLORS, PALETTE } from './palette.ts';
 import { buildingContext, resourceContext, unitContext } from './shapes.ts';
 
 interface EntityView {
@@ -24,6 +25,7 @@ interface EntityView {
   visualKey: string;
   lastHp: number;
   lastSelected: boolean;
+  lastAction: string;
 }
 
 export class Renderer {
@@ -149,7 +151,15 @@ export class Renderer {
       container.addChild(body, overlay);
       this.entityLayer.addChild(container);
 
-      view = { container, body, overlay, visualKey, lastHp: -1, lastSelected: !selected };
+      view = {
+        container,
+        body,
+        overlay,
+        visualKey,
+        lastHp: -1,
+        lastSelected: !selected,
+        lastAction: '',
+      };
       this.views.set(entity.id, view);
     }
 
@@ -158,9 +168,12 @@ export class Renderer {
     // Tri en profondeur : ce qui est « devant » en isométrique a un x+y plus grand.
     view.container.zIndex = entity.x + entity.y + (entity.kind === 'unit' ? 0.5 : 0);
 
-    if (view.lastHp !== entity.hp || view.lastSelected !== selected) {
+    const action = entity.kind === 'unit' ? currentAction(entity) : '';
+
+    if (view.lastHp !== entity.hp || view.lastSelected !== selected || view.lastAction !== action) {
       view.lastHp = entity.hp;
       view.lastSelected = selected;
+      view.lastAction = action;
       this.drawOverlay(view.overlay, entity, selected);
     }
   }
@@ -186,6 +199,7 @@ export class Renderer {
     const damaged = entity.hp < entity.maxHp;
     if (!damaged && !selected) return;
 
+
     const barWidth = Math.max(14, width * 1.4);
     const barY = isBuilding ? -Math.min(46, 12 + width) - 14 : -34;
     const ratio = Math.max(0, Math.min(1, entity.hp / entity.maxHp));
@@ -197,12 +211,31 @@ export class Renderer {
       .rect(-barWidth / 2, barY, barWidth * ratio, 3)
       .fill({ color: ratio > 0.35 ? PALETTE.hpFull : PALETTE.hpLow });
 
+    if (selected && entity.kind === 'unit') this.drawActionBadge(overlay, entity, barY);
+
     // Un chantier affiche sa progression sous sa barre de vie.
     if (isBuilding && entity.buildProgress < 1) {
       overlay
         .rect(-barWidth / 2, barY + 4, barWidth * entity.buildProgress, 2)
         .fill({ color: PALETTE.siteGhost });
     }
+  }
+
+  /**
+   * Carré d'action au-dessus d'une unité sélectionnée.
+   *
+   * Sans lui, rien ne distingue à l'écran un paysan qui coupe du bois d'un
+   * paysan qui n'a plus rien à faire — et c'est pourtant la première chose
+   * qu'un joueur a besoin de savoir sur sa sélection.
+   */
+  private drawActionBadge(overlay: Graphics, entity: Entity, barY: number): void {
+    const color = ACTION_COLORS[currentAction(entity)];
+    const size = 6;
+
+    overlay
+      .rect(-size / 2, barY - size - 3, size, size)
+      .fill({ color })
+      .stroke({ color: PALETTE.outline, width: 1 });
   }
 
   /**

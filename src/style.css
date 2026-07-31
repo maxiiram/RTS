@@ -341,3 +341,32 @@ button.rubis {
 #banner[hidden] {
   display: none;
 }
+
+/* Pastille de couleur des actions — même code que le carré affiché en jeu. */
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border: 1px solid #5c4a32;
+  vertical-align: baseline;
+}
+
+.dot[data-action='idle'] { background: #8a8375; }
+.dot[data-action='move'] { background: #9ad0ff; }
+.dot[data-action='gather'] { background: #7fc25a; }
+.dot[data-action='return'] { background: #f3e2c7; }
+.dot[data-action='build'] { background: #e89a4a; }
+.dot[data-action='attack'] { background: #e0524a; }
+
+.group-list.activity {
+  margin-top: 6px;
+}
+
+.group-list.activity span {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+  opacity: 0.85;
+}

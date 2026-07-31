@@ -13,7 +13,7 @@ import { UNITS } from './data/units.ts';
 import { createAi, stepAi } from './sim/ai.ts';
 import {
   canPlaceAt,
-  orderSmart,
+  orderGroup,
   placeBuilding,
   sandboxSpawn,
   train,
@@ -223,9 +223,10 @@ function issueOrder(screenX: number, screenY: number): void {
     return;
   }
 
-  for (const unit of units) {
-    orderSmart(world, unit, target, tile.x, tile.y);
-  }
+  // Un ordre s'adresse au groupe, pas à chaque unité séparément : c'est ce
+  // qui répartit les paysans sur tout le bosquet et évite que dix soldats
+  // fassent la queue derrière le même paysan ennemi.
+  orderGroup(world, units, target, tile.x, tile.y);
 }
 
 function placeBuildingAt(screenX: number, screenY: number): void {

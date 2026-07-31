@@ -39,6 +39,20 @@ export const PALETTE = {
   siteGhost: 0xf3e2c7,
 } as const;
 
+/**
+ * Couleur du petit carré affiché au-dessus d'une unité sélectionnée.
+ * Chaque action a la sienne, pour lire d'un coup d'œil ce que fait un groupe
+ * entier : si la moitié des carrés sont gris, la moitié des paysans chôment.
+ */
+export const ACTION_COLORS = {
+  idle: 0x8a8375,
+  move: 0x9ad0ff,
+  gather: 0x7fc25a,
+  return: 0xf3e2c7,
+  build: 0xe89a4a,
+  attack: 0xe0524a,
+} as const;
+
 /** Éclaircit ou assombrit une couleur, pour les faces d'un même volume. */
 export function shade(color: number, factor: number): number {
   const r = Math.min(255, Math.round(((color >> 16) & 0xff) * factor));

@@ -10,13 +10,15 @@ import { AGES } from '../data/ages.ts';
 import { BUILDINGS } from '../data/buildings.ts';
 import { UNITS } from '../data/units.ts';
 import type { AgeId } from '../data/types.ts';
-import { footprintOf, inBounds, nearestFreeTile } from './grid.ts';
-import type { Entity, PlayerId, World } from './types.ts';
+import { footprintOf, inBounds, isBlocked, nearestFreeTile } from './grid.ts';
+import type { Entity, PlayerId, Point, World } from './types.ts';
 import {
   canAfford,
   distanceBetween,
   isEnemy,
   isHarvestable,
+  isReachable,
+  isTargetable,
   logEvent,
   pay,
   recomputePopulation,
@@ -55,32 +57,219 @@ export function orderIdle(unit: Entity): void {
   unit.pathGoal = null;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Ordres de groupe
+// ───────────────────────────────────────────────────────────────────────────
+
 /**
- * Ordre contextuel du clic droit : la cible détermine l'action.
- * C'est la convention de tous les RTS du genre, et elle évite au joueur de
- * chercher un bouton pour chaque action courante.
+ * Un groupe sélectionné se commande comme une seule unité.
+ *
+ * Donner le même ordre à chaque unité séparément produit un résultat absurde :
+ * dix paysans s'entassent sur le même arbre, dix soldats se marchent dessus
+ * pour frapper la même cible, et tout le monde converge vers le pixel exact où
+ * le joueur a cliqué. Un ordre de groupe désigne donc une **intention sur une
+ * zone**, que l'on répartit ensuite entre les unités.
+ *
+ * Trois traductions, selon ce qui est visé :
+ *  - un point → une formation autour de ce point ;
+ *  - un gisement → le bosquet ou le filon auquel il appartient ;
+ *  - un ennemi → le groupe ennemi qui l'entoure.
  */
-export function orderSmart(world: World, unit: Entity, target: Entity | null, x: number, y: number): void {
-  const def = UNITS[unit.defId];
-  if (!def || unit.owner === null) return;
+export function orderGroup(
+  world: World,
+  units: Entity[],
+  target: Entity | null,
+  x: number,
+  y: number,
+): void {
+  // Ordre stable : deux clients qui reçoivent le même ordre doivent répartir
+  // les unités exactement de la même façon.
+  const ordered = [...units].sort((a, b) => a.id - b.id);
+  const first = ordered[0];
+  if (!first) return;
 
-  if (target && isEnemy(unit, target)) {
-    if (def.combat) orderAttack(unit, target);
-    else orderMove(unit, target.x, target.y);
+  const owner = first.owner;
+
+  if (target && ordered.some((unit) => isEnemy(unit, target))) {
+    orderGroupAttack(world, ordered, target);
     return;
   }
 
-  if (target && def.gather && isHarvestable(target, unit.owner)) {
-    orderGather(unit, target);
+  if (target && target.kind === 'building' && target.owner === owner && target.buildProgress < 1) {
+    for (const unit of ordered) {
+      if (UNITS[unit.defId]?.gather) orderBuild(unit, target);
+    }
     return;
   }
 
-  if (target && def.gather && target.kind === 'building' && target.owner === unit.owner && target.buildProgress < 1) {
-    orderBuild(unit, target);
+  if (target && owner !== null && isHarvestable(target, owner)) {
+    orderGroupGather(world, ordered, target);
     return;
   }
 
-  orderMove(unit, x, y);
+  orderGroupMove(world, ordered, x, y);
+}
+
+/** Rayon autour de la cible désignée, en tuiles, pour un ordre de zone. */
+const GATHER_AREA_RADIUS = 8;
+const ATTACK_AREA_RADIUS = 7;
+
+/**
+ * Pénalité de distance appliquée par unité déjà affectée à une cible.
+ * Elle pousse les unités à se répartir : à charge égale on prend la cible la
+ * plus proche, mais une cible déjà prise doit être nettement plus proche pour
+ * l'emporter sur une cible libre.
+ */
+const CROWDING_PENALTY = 3.5;
+
+/**
+ * Répartit les récolteurs sur tout le bosquet plutôt que sur l'arbre cliqué.
+ * Ne retient que les gisements réellement approchables : un arbre cerné par
+ * d'autres arbres n'est exploitable par personne.
+ */
+export function orderGroupGather(world: World, units: Entity[], node: Entity): void {
+  const owner = units[0]?.owner;
+  if (owner === undefined || owner === null) return;
+
+  const cluster: Entity[] = [];
+  for (const candidate of world.entities.values()) {
+    if (!isHarvestable(candidate, owner)) continue;
+    if (candidate.resource !== node.resource) continue;
+    if (distanceBetween(node, candidate) > GATHER_AREA_RADIUS) continue;
+    if (candidate.id !== node.id && !isReachable(world, candidate)) continue;
+    cluster.push(candidate);
+  }
+
+  if (cluster.length === 0) {
+    for (const unit of units) orderGather(unit, node);
+    return;
+  }
+
+  assign(units, cluster, (unit) => UNITS[unit.defId]?.gather !== undefined, orderGather);
+}
+
+/**
+ * Envoie le groupe sur la troupe ennemie autour de la cible désignée, et non
+ * sur ce seul défenseur : viser un paysan isolé au milieu de sa base ne doit
+ * pas laisser dix soldats faire la queue derrière lui.
+ */
+export function orderGroupAttack(world: World, units: Entity[], target: Entity): void {
+  const attacker = units[0];
+  if (!attacker) return;
+
+  const cluster: Entity[] = [];
+  for (const candidate of world.entities.values()) {
+    if (!isEnemy(attacker, candidate) || !isTargetable(candidate)) continue;
+    if (candidate.id !== target.id) {
+      if (distanceBetween(target, candidate) > ATTACK_AREA_RADIUS) continue;
+      // Les bâtiments ne sont pas ajoutés d'office : on ne détourne pas une
+      // attaque sur une unité vers la maison d'à côté.
+      if (candidate.kind !== 'unit') continue;
+    }
+    cluster.push(candidate);
+  }
+
+  if (cluster.length === 0) {
+    for (const unit of units) orderAttack(unit, target);
+    return;
+  }
+
+  assign(units, cluster, (unit) => UNITS[unit.defId]?.combat !== undefined, orderAttack);
+}
+
+/**
+ * Affecte chaque unité à la cible la plus proche, en évitant que toutes
+ * choisissent la même. Déterministe : même entrée, même répartition.
+ */
+function assign(
+  units: Entity[],
+  targets: Entity[],
+  eligible: (unit: Entity) => boolean,
+  give: (unit: Entity, target: Entity) => void,
+): void {
+  const load = new Map<number, number>();
+
+  for (const unit of units) {
+    if (!eligible(unit)) continue;
+
+    let best: Entity | null = null;
+    let bestScore = Infinity;
+
+    for (const candidate of targets) {
+      const score =
+        distanceBetween(unit, candidate) + (load.get(candidate.id) ?? 0) * CROWDING_PENALTY;
+      if (score < bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+
+    if (!best) continue;
+    load.set(best.id, (load.get(best.id) ?? 0) + 1);
+    give(unit, best);
+  }
+}
+
+/**
+ * Déplace le groupe en formation autour du point visé, au lieu d'envoyer tout
+ * le monde sur la même case — où les unités passeraient leur temps à se
+ * pousser les unes les autres.
+ */
+export function orderGroupMove(world: World, units: Entity[], x: number, y: number): void {
+  if (units.length === 1) {
+    const single = units[0] as Entity;
+    orderMove(single, x, y);
+    return;
+  }
+
+  const slots = formationSlots(world, units.length, x, y);
+  const remaining = new Set(units);
+
+  // Chaque emplacement revient à l'unité la plus proche encore libre : le
+  // groupe garde ainsi sa disposition d'origine au lieu de se croiser.
+  for (const slot of slots) {
+    let best: Entity | null = null;
+    let bestDistance = Infinity;
+
+    for (const unit of remaining) {
+      const distance = Math.hypot(unit.x - slot.x, unit.y - slot.y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = unit;
+      }
+    }
+
+    if (!best) break;
+    remaining.delete(best);
+    orderMove(best, slot.x, slot.y);
+  }
+
+  // Sécurité : une unité sans emplacement va au point visé.
+  for (const unit of remaining) orderMove(unit, x, y);
+}
+
+/** Grille carrée d'emplacements centrée sur le point visé. */
+function formationSlots(world: World, count: number, x: number, y: number): Point[] {
+  const columns = Math.ceil(Math.sqrt(count));
+  const rows = Math.ceil(count / columns);
+  const spacing = 1.1;
+  const slots: Point[] = [];
+
+  for (let index = 0; index < count; index++) {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const px = x + (column - (columns - 1) / 2) * spacing;
+    const py = y + (row - (rows - 1) / 2) * spacing;
+
+    if (isBlocked(world, px, py)) {
+      const free = nearestFreeTile(world, Math.floor(px), Math.floor(py), 6);
+      slots.push(free ? { x: free.x + 0.5, y: free.y + 0.5 } : { x, y });
+    } else {
+      slots.push({ x: px, y: py });
+    }
+  }
+
+  return slots;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

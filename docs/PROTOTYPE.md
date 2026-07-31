@@ -21,6 +21,14 @@ totale de l'adversaire, GDD §8).
   pour donner un enjeu à l'expansion.
 - **Sélection** au clic ou au rectangle, **ordres contextuels** au clic droit —
   la cible détermine l'action (marcher, récolter, bâtir, attaquer).
+- **Ordres de groupe** : un groupe sélectionné se commande comme une seule
+  unité. Cliquer un arbre répartit les paysans sur tout le bosquet, viser un
+  ennemi engage la troupe qui l'entoure, et un déplacement déploie le groupe en
+  formation au lieu de l'entasser sur une case.
+- **Carré d'action** au-dessus de chaque unité sélectionnée, avec sa couleur :
+  au repos, en marche, récolte, retour au dépôt, construction, attaque. Le
+  panneau de sélection résume l'activité d'un groupe entier (« 8 récoltent,
+  3 au repos »).
 - **Récolte** des quatre ressources, avec dépôt automatique au bâtiment le plus
   proche et retour sur le gisement.
 - **Construction** des dix bâtiments, avec aperçu de l'emplacement et chantier
@@ -69,6 +77,11 @@ Limites connues du prototype, moins graves mais réelles :
 - Chaque unité calcule son chemin dans son coin. À une centaine d'unités ça
   tient sans peine ; à plusieurs centaines, il faudra un champ de flux.
 - Pas de file d'ordres (pas de « va ici *puis* là »).
+- Le groupe se déplace en formation mais chacun à sa vitesse : mêler de la
+  cavalerie à de l'infanterie étire la colonne. Caler tout le monde sur le plus
+  lent serait plus propre visuellement, mais rendrait la cavalerie inutilisable
+  en escorte.
+- Pas de groupes de contrôle (Ctrl+1 pour mémoriser une sélection).
 - La ferme s'épuise et disparaît, mais rien ne prévient le joueur avant.
 
 ---
@@ -108,7 +121,7 @@ moindre écart de calcul entre deux machines fait diverger la partie.
 ## Tests
 
 ```bash
-npm test                  # 50 vérifications, dont 12 de simulation
+npm test                  # 55 vérifications, dont 17 de simulation
 npm run balance           # rapport d'équilibrage
 npm run typecheck
 node scripts/smoke.mjs    # parcours complet dans un vrai navigateur
@@ -119,7 +132,7 @@ qu'aucun test headless ne peut voir : rendu, entrées et HUD. Il a besoin de
 `npm run dev` en parallèle, et accepte un dossier de captures en second
 argument.
 
-Deux bugs ont été trouvés par ces tests plutôt qu'en jouant :
+Trois bugs ont été trouvés par ces tests plutôt qu'en jouant :
 
 - Les unités s'immobilisaient **juste** hors de portée de leur cible sans
   jamais rien faire — le test d'arrivée portait sur un point d'approche mobile
@@ -128,6 +141,11 @@ Deux bugs ont été trouvés par ces tests plutôt qu'en jouant :
   indéfiniment : aucune case libre autour, donc aucune position d'où le
   couper. Les unités abandonnent maintenant une cible inatteignable au bout de
   trois secondes et en choisissent une autre.
+- Un ordre donné à un groupe était en réalité donné à chaque unité
+  séparément, ce qui entassait tout le monde sur la même cible. Un test vérifie
+  désormais que dix paysans se partagent au moins trois arbres, et que la
+  répartition ne dépend pas de l'ordre de la sélection — condition nécessaire
+  au multijoueur.
 
 ---
 
@@ -142,3 +160,14 @@ Deux bugs ont été trouvés par ces tests plutôt qu'en jouant :
 | Déplacer la vue | ZQSD, flèches, ou glisser au clic molette |
 | Zoom | Molette |
 | Annuler | Échap |
+
+Le carré coloré au-dessus d'une unité sélectionnée indique son action :
+
+| Couleur | Action |
+|---|---|
+| Gris | Au repos — l'unité ne fait rien |
+| Bleu clair | Se déplace |
+| Vert | Récolte |
+| Crème | Rapporte sa charge au dépôt |
+| Orange | Construit |
+| Rouge | Attaque |

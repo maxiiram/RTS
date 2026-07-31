@@ -12,6 +12,7 @@ import { UNITS } from '../data/units.ts';
 import type { Cost, ResourceId } from '../data/types.ts';
 import { canAdvanceAge, canBuild, canTrain } from '../sim/commands.ts';
 import type { Entity, World } from '../sim/types.ts';
+import { actionLabel, currentAction } from '../sim/world.ts';
 import { displayName } from '../render/renderer.ts';
 
 export interface HudCallbacks {
@@ -23,6 +24,16 @@ export interface HudCallbacks {
   onCheatResources: () => void;
   onToggleAi: (enabled: boolean) => void;
 }
+
+/** Verbes au pluriel, pour résumer l'activité d'un groupe. */
+const ACTIVITY_LABELS: Record<string, string> = {
+  idle: 'au repos',
+  move: 'en marche',
+  gather: 'récoltent',
+  return: 'rapportent',
+  build: 'bâtissent',
+  attack: 'attaquent',
+};
 
 const RESOURCE_SHORT: Record<ResourceId, string> = {
   food: 'N',
@@ -161,7 +172,23 @@ export class Hud {
       const chips = [...counts]
         .map(([name, n]) => `<span>${n} × ${name}</span>`)
         .join('');
-      this.selectionPanel.innerHTML = `<h3>${entities.length} unités</h3><div class="group-list">${chips}</div>`;
+
+      // Ce que fait le groupe compte autant que sa composition : trois paysans
+      // au repos au milieu de dix qui récoltent, ça doit sauter aux yeux.
+      const activity = new Map<string, number>();
+      for (const entity of entities) {
+        if (entity.kind !== 'unit') continue;
+        const action = currentAction(entity);
+        activity.set(action, (activity.get(action) ?? 0) + 1);
+      }
+
+      const activityChips = [...activity]
+        .map(([action, n]) => `<span><i class="dot" data-action="${action}"></i>${n} ${ACTIVITY_LABELS[action] ?? action}</span>`)
+        .join('');
+
+      this.selectionPanel.innerHTML =
+        `<h3>${entities.length} unités</h3><div class="group-list">${chips}</div>` +
+        `<div class="group-list activity">${activityChips}</div>`;
     }
 
     this.renderActions(world, entities[0] ?? null, entities);
@@ -191,6 +218,8 @@ export class Hud {
 
     const def = UNITS[entity.defId];
     const rows: string[] = [
+      `<span class="action-row"><i class="dot" data-action="${currentAction(entity)}"></i>Action</span>` +
+        `<span>${actionLabel(entity)}</span>`,
       `<span>Points de vie</span><span>${Math.ceil(entity.hp)} / ${entity.maxHp}</span>`,
       `<span>Armure</span><span>${def?.armor ?? 0}</span>`,
     ];
