@@ -75,9 +75,12 @@ Par ordre d'importance pour la suite :
 
 Limites connues du prototype, moins graves mais réelles :
 
-- Les unités se poussent doucement sans vraie gestion de collisions : elles
-  peuvent s'empiler dans un goulet. Le déplacement de groupe ne se bloque
-  jamais, mais la formation n'est pas propre.
+- Les unités se poussent doucement sans vraie gestion de collisions : dans un
+  passage d'une seule tuile, elles se traversent en partie au lieu de faire la
+  queue proprement. C'est le compromis assumé qui garantit qu'un groupe ne se
+  bloque jamais (voir la règle d'écartement plus bas). Une vraie file d'attente
+  demanderait de réserver les cases du passage, ce qui n'est pas au programme
+  de cette version.
 - Chaque unité calcule son chemin dans son coin. À une centaine d'unités ça
   tient sans peine ; à plusieurs centaines, il faudra un champ de flux.
 - Pas de file d'ordres (pas de « va ici *puis* là »).
@@ -87,6 +90,32 @@ Limites connues du prototype, moins graves mais réelles :
   en escorte.
 - Pas de groupes de contrôle (Ctrl+1 pour mémoriser une sélection).
 - La ferme s'épuise et disparaît, mais rien ne prévient le joueur avant.
+
+---
+
+## Passages étroits et écartement des unités
+
+Un groupe lancé vers un passage d'une seule tuile s'immobilisait en bloc, sans
+même l'atteindre. La cause n'était pas le passage mais la règle qui empêche les
+unités de se superposer : elle corrigeait les positions plus vite que les
+unités n'avançaient, transformant tout paquet dense en bloc auto-verrouillé.
+
+Trois règles gouvernent désormais cet écartement :
+
+1. **La poussée ne dépasse jamais la marche.** Elle est plafonnée à une
+   fraction du pas de déplacement, si bien qu'avancer l'emporte toujours sur
+   s'écarter. C'est la correction qui débloque tout le reste.
+2. **Qui marche a la priorité.** Une unité à l'arrêt encaisse l'essentiel de la
+   correction et s'écarte du passage, au lieu de faire barrage à celles qui
+   veulent l'emprunter.
+3. **Personne n'est poussé dans un mur.** Une correction qui ferait entrer une
+   unité dans une case infranchissable est annulée sur cet axe seulement :
+   l'unité glisse le long de l'obstacle plutôt que de s'y encastrer.
+
+Quatre tests jouent la situation exacte — un mur percé d'un seul passage — et
+vérifient qu'un groupe le franchit, que deux colonnes en sens inverse se
+croisent, qu'une unité à l'arrêt finit par céder le passage, et qu'aucune unité
+ne termine encastrée dans un obstacle.
 
 ---
 
@@ -125,7 +154,7 @@ moindre écart de calcul entre deux machines fait diverger la partie.
 ## Tests
 
 ```bash
-npm test                  # 60 vérifications, dont 22 de simulation
+npm test                  # 64 vérifications, dont 26 de simulation
 npm run balance           # rapport d'équilibrage
 npm run typecheck
 node scripts/smoke.mjs    # parcours complet dans un vrai navigateur
@@ -136,7 +165,7 @@ qu'aucun test headless ne peut voir : rendu, entrées et HUD. Il a besoin de
 `npm run dev` en parallèle, et accepte un dossier de captures en second
 argument.
 
-Trois bugs ont été trouvés par ces tests plutôt qu'en jouant :
+Quatre bugs ont été trouvés par ces tests plutôt qu'en jouant :
 
 - Les unités s'immobilisaient **juste** hors de portée de leur cible sans
   jamais rien faire — le test d'arrivée portait sur un point d'approche mobile
@@ -150,6 +179,10 @@ Trois bugs ont été trouvés par ces tests plutôt qu'en jouant :
   désormais que dix paysans se partagent au moins trois arbres, et que la
   répartition ne dépend pas de l'ordre de la sélection — condition nécessaire
   au multijoueur.
+- Un groupe lancé vers un passage étroit se verrouillait lui-même : la
+  correction d'écartement était plus forte que le pas de déplacement, si bien
+  qu'un paquet d'unités s'immobilisait **avant même** d'atteindre le goulet.
+  Quatre tests couvrent maintenant ce cas de figure (voir plus bas).
 
 ---
 

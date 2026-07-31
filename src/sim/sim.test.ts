@@ -13,10 +13,17 @@ import { SIM_TICK_SECONDS } from '../data/constants.ts';
 import { UNITS } from '../data/units.ts';
 import { createAi, stepAi } from './ai.ts';
 import { ageProgress, orderGather, orderGroup, orderMove, sandboxSpawn, train } from './commands.ts';
-import { findPath } from './grid.ts';
+import { findPath, rebuildBlocked } from './grid.ts';
 import { stepWorld } from './sim.ts';
 import type { Entity, World } from './types.ts';
-import { createWorld, findNearest, isHarvestable, spawnBuilding, spawnUnit } from './world.ts';
+import {
+  createWorld,
+  findNearest,
+  isHarvestable,
+  spawnBuilding,
+  spawnResource,
+  spawnUnit,
+} from './world.ts';
 
 /** Fait tourner la simulation pendant N secondes de temps de jeu. */
 function run(world: World, seconds: number, onTick?: (dt: number) => void): void {
@@ -74,6 +81,87 @@ describe('déplacement', () => {
   it('ne renvoie pas de chemin vers une case hors carte', () => {
     const world = createWorld();
     strictEqual(findPath(world, { x: 5, y: 5 }, { x: -3, y: 200 }).length, 0);
+  });
+});
+
+describe('passages étroits', () => {
+  /**
+   * Mur infranchissable percé d'un seul passage d'une tuile — la situation qui
+   * bloquait des groupes entiers en jeu.
+   */
+  function corridor(gapY = 30): World {
+    const world = createWorld();
+    for (let y = 20; y <= 40; y++) {
+      if (y === gapY) continue;
+      spawnResource(world, 'wood', 30, y);
+    }
+    rebuildBlocked(world);
+    return world;
+  }
+
+  it('un groupe franchit un goulet au lieu de se verrouiller lui-même', () => {
+    // Régression : une correction d'écartement plus forte que le pas de
+    // déplacement transformait un paquet d'unités en bloc immobile, et le
+    // groupe n'atteignait même pas le passage.
+    const world = corridor();
+    const units: Entity[] = [];
+    for (let i = 0; i < 6; i++) {
+      units.push(spawnUnit(world, 'soldat', 0, 26 + (i % 2) * 0.6, 29 + Math.floor(i / 2) * 0.6));
+    }
+    for (const unit of units) orderMove(unit, 35, 30);
+
+    run(world, 60);
+
+    const through = units.filter((u) => u.x > 32).length;
+    strictEqual(through, units.length, `seules ${through} unités sur 6 ont franchi le passage`);
+  });
+
+  it('deux colonnes en sens inverse se croisent dans le passage', () => {
+    const world = corridor();
+    const left: Entity[] = [];
+    const right: Entity[] = [];
+    for (let i = 0; i < 3; i++) left.push(spawnUnit(world, 'soldat', 0, 27 + i * 0.5, 30));
+    for (let i = 0; i < 3; i++) right.push(spawnUnit(world, 'soldat', 0, 33 + i * 0.5, 30));
+
+    for (const unit of left) orderMove(unit, 35, 30);
+    for (const unit of right) orderMove(unit, 25, 30);
+
+    run(world, 60);
+
+    const through = left.filter((u) => u.x > 32).length + right.filter((u) => u.x < 28).length;
+    strictEqual(through, 6, `${through} unités sur 6 ont traversé`);
+  });
+
+  it('une unité à l\'arrêt finit par céder le passage', () => {
+    const world = corridor();
+    spawnUnit(world, 'soldat', 0, 30.5, 30.5);
+
+    const units: Entity[] = [];
+    for (let i = 0; i < 4; i++) units.push(spawnUnit(world, 'soldat', 0, 27 + i * 0.5, 30));
+    for (const unit of units) orderMove(unit, 35, 30);
+
+    run(world, 60);
+
+    strictEqual(units.filter((u) => u.x > 32).length, 4);
+  });
+
+  it('aucune unité ne se retrouve encastrée dans un obstacle', () => {
+    const world = corridor();
+    const units: Entity[] = [];
+    for (let i = 0; i < 8; i++) units.push(spawnUnit(world, 'soldat', 0, 29.5, 29 + i * 0.3));
+    for (const unit of units) orderMove(unit, 35, 30);
+
+    run(world, 30);
+
+    for (const unit of units) {
+      const tx = Math.floor(unit.x);
+      const ty = Math.floor(unit.y);
+      strictEqual(
+        world.blocked[ty * world.width + tx],
+        0,
+        `une unité a été poussée dans un obstacle en ${tx},${ty}`,
+      );
+    }
   });
 });
 

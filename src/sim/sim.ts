@@ -14,7 +14,7 @@ import { RESOURCES } from '../data/resources.ts';
 import { UNITS } from '../data/units.ts';
 import type { AgeId, ResourceId, UnitDef } from '../data/types.ts';
 import { damagePerHit, type DamageTarget } from '../balance/combat.ts';
-import { findPath, nearestFreeTile, rebuildBlocked } from './grid.ts';
+import { findPath, isBlocked, nearestFreeTile, rebuildBlocked } from './grid.ts';
 import { orderGather, orderIdle, orderMove } from './commands.ts';
 import type { Entity, Point, World } from './types.ts';
 import {
@@ -59,7 +59,7 @@ export function stepWorld(world: World): void {
     }
   }
 
-  separateUnits(world);
+  separateUnits(world, dt);
   removeDead(world);
 
   // La population et la victoire changent rarement : une fois par seconde suffit.
@@ -442,18 +442,26 @@ function moveTowards(
 /**
  * Écarte les unités qui se chevauchent.
  *
- * Ce n'est pas de la vraie gestion de collisions : les unités se poussent
- * doucement, sans jamais se bloquer mutuellement. Un empilement reste possible
- * dans un goulet, mais le déplacement de groupe ne se coince jamais — un
- * compromis assumé pour une première version.
+ * Trois règles, apprises d'un blocage observé en jeu : un paquet d'unités
+ * lancées vers un passage étroit s'immobilisait complètement, chacune
+ * repoussée par ses voisines.
+ *
+ * 1. **La poussée ne dépasse jamais la marche.** C'était la cause du blocage :
+ *    une correction plus forte que le pas de déplacement transforme un groupe
+ *    dense en bloc qui se verrouille lui-même. Elle est désormais plafonnée à
+ *    une fraction du pas, si bien qu'avancer l'emporte toujours sur s'écarter.
+ * 2. **Qui marche a la priorité.** Une unité à l'arrêt encaisse l'essentiel de
+ *    la correction : elle s'écarte du passage au lieu de faire barrage.
+ * 3. **Personne n'est poussé dans un mur.** Une correction qui ferait entrer
+ *    une unité dans une case infranchissable est annulée sur cet axe.
  */
-function separateUnits(world: World): void {
+function separateUnits(world: World, dt: number): void {
   const units: Entity[] = [];
   for (const e of world.entities.values()) {
     if (e.kind === 'unit' && e.hp > 0) units.push(e);
   }
 
-  // Découpage en cases de 1 tuile : évite de comparer toutes les paires.
+  // Découpage en cases d'une tuile : évite de comparer toutes les paires.
   const buckets = new Map<string, Entity[]>();
   for (const e of units) {
     const key = `${Math.floor(e.x)},${Math.floor(e.y)}`;
@@ -463,6 +471,17 @@ function separateUnits(world: World): void {
   }
 
   const minDistance = 0.45;
+  const corrections = new Map<number, Point>();
+
+  const add = (e: Entity, dx: number, dy: number): void => {
+    const current = corrections.get(e.id);
+    if (current) {
+      current.x += dx;
+      current.y += dy;
+    } else {
+      corrections.set(e.id, { x: dx, y: dy });
+    }
+  };
 
   for (const e of units) {
     const cx = Math.floor(e.x);
@@ -480,19 +499,44 @@ function separateUnits(world: World): void {
           const distance = Math.hypot(ox, oy);
           if (distance >= minDistance) continue;
 
-          // Deux unités exactement superposées : on en décale une arbitrairement
-          // mais de façon déterministe, jamais au hasard.
+          // Deux unités exactement superposées : on en décale une de façon
+          // arbitraire mais déterministe, jamais au hasard.
           const nx = distance < 0.001 ? ((e.id % 3) - 1) * 0.01 : ox / distance;
           const ny = distance < 0.001 ? ((e.id % 5) - 2) * 0.01 : oy / distance;
-          const push = (minDistance - distance) * 0.5;
+          const overlap = minDistance - distance;
 
-          e.x -= nx * push;
-          e.y -= ny * push;
-          other.x += nx * push;
-          other.y += ny * push;
+          // Celle qui marche cède peu de terrain, celle qui stationne s'écarte.
+          const eMoving = e.path.length > 0;
+          const otherMoving = other.path.length > 0;
+          let eShare = 0.5;
+          if (eMoving && !otherMoving) eShare = 0.15;
+          else if (!eMoving && otherMoving) eShare = 0.85;
+
+          add(e, -nx * overlap * eShare, -ny * overlap * eShare);
+          add(other, nx * overlap * (1 - eShare), ny * overlap * (1 - eShare));
         }
       }
     }
+  }
+
+  for (const e of units) {
+    const correction = corrections.get(e.id);
+    if (!correction) continue;
+
+    const def = UNITS[e.defId];
+    const length = Math.hypot(correction.x, correction.y);
+    if (length < 1e-6) continue;
+
+    // Le plafond est la clé : s'écarter reste toujours plus lent qu'avancer.
+    const maxCorrection = (def?.speed ?? 1) * dt * 0.6;
+    const scale = Math.min(1, maxCorrection / length);
+    const targetX = e.x + correction.x * scale;
+    const targetY = e.y + correction.y * scale;
+
+    // Un axe qui mènerait dans un obstacle est abandonné, l'autre s'applique :
+    // l'unité glisse le long du mur au lieu d'y être encastrée.
+    if (!isBlocked(world, targetX, e.y)) e.x = targetX;
+    if (!isBlocked(world, e.x, targetY)) e.y = targetY;
   }
 
   for (const e of units) {

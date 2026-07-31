@@ -6,7 +6,7 @@ choix, il ne fait pas autorité sur les valeurs** — le code est la source de
 vérité, et il est vérifié par `npm test`.
 
 ```bash
-npm test        # 60 vérifications d'intégrité et d'équilibrage
+npm test        # 64 vérifications d'intégrité et d'équilibrage
 npm run balance # rapport complet : duels, rendements, rythme de partie
 npm run typecheck
 ```
