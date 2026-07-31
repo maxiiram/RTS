@@ -42,7 +42,7 @@ Node 22.18 ou plus récent (les fichiers `.ts` s'exécutent nativement, sans
 ```bash
 npm run dev        # serveur de développement
 npm run build      # page statique dans dist/, hébergeable telle quelle
-npm test           # 55 vérifications : données, équilibrage, simulation
+npm test           # 60 vérifications : données, équilibrage, simulation
 npm run balance    # rapport d'équilibrage : duels, rendements, rythme
 npm run typecheck
 

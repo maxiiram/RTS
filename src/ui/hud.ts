@@ -7,12 +7,12 @@
 
 import { AGES } from '../data/ages.ts';
 import { BUILDINGS } from '../data/buildings.ts';
-import { RESOURCE_IDS } from '../data/resources.ts';
+import { RESOURCES, RESOURCE_IDS } from '../data/resources.ts';
 import { UNITS } from '../data/units.ts';
 import type { Cost, ResourceId } from '../data/types.ts';
-import { canAdvanceAge, canBuild, canTrain } from '../sim/commands.ts';
+import { ageProgress, canBuild, canTrain } from '../sim/commands.ts';
 import type { Entity, World } from '../sim/types.ts';
-import { actionLabel, currentAction } from '../sim/world.ts';
+import { actionLabel, currentAction, missingResources } from '../sim/world.ts';
 import { displayName } from '../render/renderer.ts';
 
 export interface HudCallbacks {
@@ -49,6 +49,32 @@ function formatCost(cost: Cost): string {
   return parts.join('  ') || 'gratuit';
 }
 
+/** « 320 nourriture et 150 or » — vide si rien n'est demandé. */
+function formatResourceList(cost: Cost): string {
+  const parts = RESOURCE_IDS.filter((r) => (cost[r] ?? 0) > 0).map(
+    (r) => `${cost[r]} ${RESOURCES[r].nameFr.toLowerCase()}`,
+  );
+
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0] as string;
+  return `${parts.slice(0, -1).join(', ')} et ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Transforme un refus en explication utile. « Ressources insuffisantes » ne
+ * dit pas laquelle : on chiffre le manque.
+ */
+function explain(world: World, reason: string | undefined, cost: Cost): string {
+  if (!reason) return `Coût : ${formatResourceList(cost)}`;
+
+  if (reason === 'Ressources insuffisantes') {
+    const missing = formatResourceList(missingResources(world, 0, cost));
+    return missing ? `Il manque ${missing}` : reason;
+  }
+
+  return reason;
+}
+
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
   if (!found) throw new Error(`Élément introuvable : ${id}`);
@@ -62,6 +88,7 @@ export class Hud {
   private popLabel = element('res-pop');
   private ageLabel = element('age-label');
   private advanceButton = element<HTMLButtonElement>('advance-btn');
+  private advanceHint = element('advance-hint');
   private clockLabel = element('clock');
   private selectionPanel = element('selection-panel');
   private actionsPanel = element('actions-panel');
@@ -136,9 +163,7 @@ export class Hud {
       ? `${AGES[player.age].nameFr} → ${Math.ceil(advancing)} s`
       : AGES[player.age].nameFr;
 
-    const canAdvance = canAdvanceAge(world, 0);
-    this.advanceButton.disabled = !canAdvance.ok;
-    this.advanceButton.title = canAdvance.reason ?? '';
+    this.renderAgeProgress(world);
 
     const minutes = Math.floor(world.time / 60);
     const seconds = Math.floor(world.time % 60);
@@ -147,6 +172,58 @@ export class Hud {
     this.renderSelection(world, selection);
     this.renderLog(world);
     this.renderBanner(world);
+  }
+
+  /**
+   * Bandeau de progression d'âge.
+   *
+   * Un bouton grisé sans explication est le pire des cas : le joueur voit que
+   * c'est impossible mais pas ce qu'il doit faire. On affiche donc en clair ce
+   * qui manque — les ressources à la quantité près, et le nombre de bâtiments.
+   */
+  private renderAgeProgress(world: World): void {
+    const progress = ageProgress(world, 0);
+
+    if (progress.nextAge === null) {
+      this.advanceButton.hidden = true;
+      this.advanceHint.textContent = 'Âge maximal atteint';
+      this.advanceHint.className = '';
+      return;
+    }
+
+    this.advanceButton.hidden = false;
+    this.advanceButton.textContent = `Passer à l'${progress.nameFr}`;
+    this.advanceButton.disabled = !progress.ready;
+
+    if (progress.researching) {
+      this.advanceHint.textContent = 'Recherche en cours';
+      this.advanceHint.className = '';
+      this.advanceButton.title = '';
+      return;
+    }
+
+    const gaps: string[] = [];
+
+    const missing = formatResourceList(progress.missing);
+    if (missing) gaps.push(missing);
+
+    const buildingsShort = progress.buildingsRequired - progress.buildingsOwned;
+    if (buildingsShort > 0) {
+      gaps.push(
+        `${buildingsShort} bâtiment${buildingsShort > 1 ? 's' : ''} ` +
+          `(${progress.buildingsOwned}/${progress.buildingsRequired})`,
+      );
+    }
+
+    if (gaps.length === 0) {
+      this.advanceHint.textContent = `Prêt — coûte ${formatResourceList(progress.cost)}`;
+      this.advanceHint.className = 'ready';
+    } else {
+      this.advanceHint.textContent = `Il manque ${gaps.join(' et ')}`;
+      this.advanceHint.className = 'missing';
+    }
+
+    this.advanceButton.title = `Coût : ${formatResourceList(progress.cost)}`;
   }
 
   private renderSelection(world: World, selection: Set<number>): void {
@@ -296,7 +373,7 @@ export class Hud {
       button.className = 'action';
       button.innerHTML = `<b>${unit.nameFr}</b><small>${formatCost(unit.cost)} · ${unit.trainTime} s</small>`;
       button.disabled = !check.ok;
-      button.title = check.reason ?? '';
+      button.title = explain(world, check.reason, unit.cost);
       button.addEventListener('click', () => this.callbacks.onTrain(building, unitId));
       this.actionsPanel.appendChild(button);
     }
@@ -312,7 +389,7 @@ export class Hud {
       button.className = 'action';
       button.innerHTML = `<b>${def.nameFr}</b><small>${formatCost(def.cost)} · ${def.buildTime} s</small>`;
       button.disabled = !check.ok;
-      button.title = check.reason ?? '';
+      button.title = explain(world, check.reason, def.cost);
       button.addEventListener('click', () => this.callbacks.onBuild(def.id));
       this.actionsPanel.appendChild(button);
     }

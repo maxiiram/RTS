@@ -12,11 +12,11 @@ import { describe, it } from 'node:test';
 import { SIM_TICK_SECONDS } from '../data/constants.ts';
 import { UNITS } from '../data/units.ts';
 import { createAi, stepAi } from './ai.ts';
-import { orderGather, orderGroup, orderMove, sandboxSpawn, train } from './commands.ts';
+import { ageProgress, orderGather, orderGroup, orderMove, sandboxSpawn, train } from './commands.ts';
 import { findPath } from './grid.ts';
 import { stepWorld } from './sim.ts';
 import type { Entity, World } from './types.ts';
-import { createWorld, findNearest, isHarvestable, spawnUnit } from './world.ts';
+import { createWorld, findNearest, isHarvestable, spawnBuilding, spawnUnit } from './world.ts';
 
 /** Fait tourner la simulation pendant N secondes de temps de jeu. */
 function run(world: World, seconds: number, onTick?: (dt: number) => void): void {
@@ -308,6 +308,61 @@ describe('partie complète contre l\'IA', () => {
     run(second, 600, (dt) => stepAi(second, secondAi, dt));
 
     strictEqual(signature(first), signature(second));
+  });
+});
+
+describe('progression d\'âge', () => {
+  it('chiffre exactement ce qui manque', () => {
+    const world = createWorld();
+    const progress = ageProgress(world, 0);
+
+    strictEqual(progress.nextAge, 2);
+    strictEqual(progress.nameFr, 'Âge Féodal');
+    // 500 de nourriture demandés, 200 en réserve au départ.
+    strictEqual(progress.missing.food, 300);
+    strictEqual(progress.buildingsOwned, 0);
+    strictEqual(progress.buildingsRequired, 2);
+    strictEqual(progress.ready, false);
+  });
+
+  it('ne signale plus les ressources une fois le coût couvert', () => {
+    const world = createWorld();
+    world.players[0].resources.food = 900;
+
+    const progress = ageProgress(world, 0);
+    strictEqual(Object.keys(progress.missing).length, 0);
+    // Les bâtiments manquent toujours : le passage reste impossible.
+    strictEqual(progress.ready, false);
+  });
+
+  it('passe à « prêt » quand ressources et bâtiments sont réunis', () => {
+    const world = createWorld();
+    world.players[0].resources.food = 900;
+    spawnBuilding(world, 'maison', 0, 20, 20);
+    spawnBuilding(world, 'camp_bucheron', 0, 24, 20);
+
+    const progress = ageProgress(world, 0);
+    strictEqual(progress.buildingsOwned, 2);
+    strictEqual(progress.ready, true);
+  });
+
+  it('ne compte pas le centre-ville ni les chantiers en cours', () => {
+    // Le centre-ville est offert au départ : le compter reviendrait à offrir
+    // un tiers du prérequis. Un chantier inachevé ne prouve rien non plus.
+    const world = createWorld();
+    world.players[0].resources.food = 900;
+    spawnBuilding(world, 'maison', 0, 20, 20, false);
+
+    strictEqual(ageProgress(world, 0).buildingsOwned, 0);
+  });
+
+  it('signale le dernier âge au lieu d\'un objectif inatteignable', () => {
+    const world = createWorld();
+    world.players[0].age = 3;
+
+    const progress = ageProgress(world, 0);
+    strictEqual(progress.nextAge, null);
+    strictEqual(progress.ready, false);
   });
 });
 

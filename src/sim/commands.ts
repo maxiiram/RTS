@@ -9,7 +9,7 @@
 import { AGES } from '../data/ages.ts';
 import { BUILDINGS } from '../data/buildings.ts';
 import { UNITS } from '../data/units.ts';
-import type { AgeId } from '../data/types.ts';
+import type { AgeId, Cost } from '../data/types.ts';
 import { footprintOf, inBounds, isBlocked, nearestFreeTile } from './grid.ts';
 import type { Entity, PlayerId, Point, World } from './types.ts';
 import {
@@ -20,6 +20,7 @@ import {
   isReachable,
   isTargetable,
   logEvent,
+  missingResources,
   pay,
   recomputePopulation,
   spawnBuilding,
@@ -399,24 +400,86 @@ export function placeBuilding(
 // Progression d'âge
 // ───────────────────────────────────────────────────────────────────────────
 
-export function canAdvanceAge(world: World, owner: PlayerId): ActionResult {
-  const player = world.players[owner];
-  if (player.advancing !== null) return { ok: false, reason: 'Recherche en cours' };
+/**
+ * État détaillé du passage à l'âge suivant.
+ *
+ * Renvoie *ce qui manque*, et pas seulement un oui/non : « impossible » sans
+ * dire pourquoi laisse le joueur cliquer sur un bouton grisé en se demandant
+ * ce qu'il doit faire. C'est la source unique dont se servent aussi bien le
+ * bandeau que la vérification de l'ordre lui-même.
+ */
+export interface AgeProgress {
+  /** Âge visé, ou null si le dernier âge est déjà atteint. */
+  nextAge: AgeId | null;
+  nameFr: string;
+  cost: Cost;
+  /** Ressources manquantes ; vide si le coût est couvert. */
+  missing: Cost;
+  buildingsRequired: number;
+  buildingsOwned: number;
+  researching: boolean;
+  ready: boolean;
+}
 
+export function ageProgress(world: World, owner: PlayerId): AgeProgress {
+  const player = world.players[owner];
   const nextAge = (player.age + 1) as AgeId;
   const def = AGES[nextAge];
-  if (!def?.advanceCost) return { ok: false, reason: 'Âge maximal atteint' };
-  if (!canAfford(world, owner, def.advanceCost)) return { ok: false, reason: 'Ressources insuffisantes' };
 
-  const required = def.requiredBuildings ?? 0;
-  let count = 0;
+  if (!def?.advanceCost) {
+    return {
+      nextAge: null,
+      nameFr: AGES[player.age].nameFr,
+      cost: {},
+      missing: {},
+      buildingsRequired: 0,
+      buildingsOwned: 0,
+      researching: false,
+      ready: false,
+    };
+  }
+
+  // Seuls comptent les bâtiments terminés de l'âge en cours ou d'avant, hors
+  // centre-ville : il est offert au départ et ne prouve aucune progression.
+  const buildingsRequired = def.requiredBuildings ?? 0;
+  let buildingsOwned = 0;
   for (const e of world.entities.values()) {
     if (e.kind !== 'building' || e.owner !== owner || e.buildProgress < 1) continue;
     if (e.defId === 'centre_ville') continue;
-    if ((BUILDINGS[e.defId]?.age ?? 1) <= player.age) count++;
+    if ((BUILDINGS[e.defId]?.age ?? 1) <= player.age) buildingsOwned++;
   }
-  if (count < required) {
-    return { ok: false, reason: `${required} bâtiments de l'âge en cours requis (${count})` };
+
+  const missing = missingResources(world, owner, def.advanceCost);
+  const researching = player.advancing !== null;
+
+  return {
+    nextAge,
+    nameFr: def.nameFr,
+    cost: def.advanceCost,
+    missing,
+    buildingsRequired,
+    buildingsOwned,
+    researching,
+    ready:
+      !researching &&
+      Object.keys(missing).length === 0 &&
+      buildingsOwned >= buildingsRequired,
+  };
+}
+
+export function canAdvanceAge(world: World, owner: PlayerId): ActionResult {
+  const progress = ageProgress(world, owner);
+
+  if (progress.nextAge === null) return { ok: false, reason: 'Âge maximal atteint' };
+  if (progress.researching) return { ok: false, reason: 'Recherche en cours' };
+  if (Object.keys(progress.missing).length > 0) {
+    return { ok: false, reason: 'Ressources insuffisantes' };
+  }
+  if (progress.buildingsOwned < progress.buildingsRequired) {
+    return {
+      ok: false,
+      reason: `${progress.buildingsRequired} bâtiments requis (${progress.buildingsOwned})`,
+    };
   }
 
   return { ok: true };

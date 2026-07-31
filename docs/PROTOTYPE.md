@@ -34,7 +34,11 @@ totale de l'adversaire, GDD §8).
 - **Construction** des dix bâtiments, avec aperçu de l'emplacement et chantier
   destructible pendant qu'il se bâtit.
 - **Production** d'unités en file d'attente, avec point de ralliement.
-- **Progression d'âge**, y compris ses prérequis en bâtiments.
+- **Progression d'âge**, y compris ses prérequis en bâtiments. Le bandeau
+  indique en clair ce qui manque encore — « Il manque 300 nourriture et
+  2 bâtiments (0/2) » — plutôt que de se contenter de griser le bouton. Même
+  principe sur les boutons de production et de construction, dont l'infobulle
+  chiffre le manque au lieu d'annoncer « ressources insuffisantes ».
 - **Combat** complet : bonus de classe, charge de la cavalerie, aura du
   porte-étendard, tours de garde, riposte automatique des unités au repos.
 - **IA d'escarmouche** pour le Royaume de Rubis. Elle ne triche pas : mêmes
@@ -121,7 +125,7 @@ moindre écart de calcul entre deux machines fait diverger la partie.
 ## Tests
 
 ```bash
-npm test                  # 55 vérifications, dont 17 de simulation
+npm test                  # 60 vérifications, dont 22 de simulation
 npm run balance           # rapport d'équilibrage
 npm run typecheck
 node scripts/smoke.mjs    # parcours complet dans un vrai navigateur

@@ -374,6 +374,23 @@ export function refund(world: World, owner: PlayerId, cost: Cost): void {
   }
 }
 
+/**
+ * Ce qui manque au joueur pour payer un coût, ressource par ressource.
+ * Les ressources déjà couvertes sont absentes du résultat.
+ */
+export function missingResources(world: World, owner: PlayerId, cost: Cost): Cost {
+  const player = world.players[owner];
+  const missing: Cost = {};
+
+  for (const [resource, amount] of Object.entries(cost)) {
+    const needed = amount ?? 0;
+    const held = player.resources[resource as ResourceId];
+    if (held < needed) missing[resource as ResourceId] = Math.ceil(needed - held);
+  }
+
+  return missing;
+}
+
 export function recomputePopulation(world: World): void {
   for (const player of world.players) {
     player.popUsed = 0;

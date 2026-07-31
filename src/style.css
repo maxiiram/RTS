@@ -370,3 +370,30 @@ button.rubis {
   padding-left: 0;
   opacity: 0.85;
 }
+
+/* Progression d'âge : ce qui manque doit se lire sans survoler le bouton. */
+
+.age-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+#advance-hint {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+#advance-hint.missing {
+  color: #f0a898;
+  opacity: 1;
+}
+
+#advance-hint.ready {
+  color: #9ed98a;
+  opacity: 1;
+}
+
+#advance-btn[hidden] {
+  display: none;
+}
