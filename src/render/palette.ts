@@ -14,6 +14,11 @@ export const PALETTE = {
   grassAccent: 0xc8dd91,
   outline: 0x5c4a32,
   background: 0x2f2a24,
+  // Tranche du plateau : la terre que l'on voit sous la prairie au bord de la
+  // carte. Deux valeurs, comme partout — claire au ras de l'herbe, sombre en
+  // dessous — pour que le bord ait une épaisseur et non une simple ligne.
+  edge: 0x6d5334,
+  edgeDeep: 0x4a3826,
 
   // Ressources
   woodTrunk: 0x8a5a34,

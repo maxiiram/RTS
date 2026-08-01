@@ -27,13 +27,16 @@ import { findPath, rebuildBlocked } from './grid.ts';
 import { stepWorld } from './sim.ts';
 import type { Entity, World } from './types.ts';
 import {
+  countNear,
   createWorld,
+  ENDOWMENT_RADIUS,
   findNearest,
   isEntityVisible,
   isHarvestable,
   spawnBuilding,
   spawnResource,
   spawnUnit,
+  STARTING_ENDOWMENT,
   visibilityAt,
 } from './world.ts';
 
@@ -106,25 +109,98 @@ describe('zones de ressources', () => {
     ok(ratio < 0.05, `${Math.round(ratio * 100)} % des gisements sont isolés de leur zone`);
   });
 
-  it('les deux royaumes reçoivent exactement la même dotation de départ', () => {
-    const world = createWorld();
+  /**
+   * Le contrat de la carte aléatoire.
+   *
+   * La carte n'est plus strictement miroir : le hasard décide de l'orientation
+   * des zones et de la position du royaume adverse. Ce qu'il ne décide jamais,
+   * c'est si la partie est jouable — et c'est exactement ce que ce test
+   * vérifie, sur cinquante graines plutôt que sur une seule. Un départ sans or
+   * n'est pas une carte variée, c'est une carte ratée.
+   */
+  it('chaque royaume trouve sa dotation minimale, quelle que soit la graine', () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const world = createWorld(seed);
 
-    const nearBase = (owner: number) => {
-      const tc = [...world.entities.values()].find(
-        (e) => e.owner === owner && e.defId === 'centre_ville',
-      ) as Entity;
+      for (const owner of [0, 1]) {
+        const tc = [...world.entities.values()].find(
+          (e) => e.owner === owner && e.defId === 'centre_ville',
+        ) as Entity;
 
-      const counts: Record<string, number> = { food: 0, wood: 0, gold: 0, stone: 0 };
-      for (const e of world.entities.values()) {
-        if (e.kind !== 'resource' || e.resource === null) continue;
-        if (Math.hypot(e.x - tc.x, e.y - tc.y) > 22) continue;
-        counts[e.resource] = (counts[e.resource] ?? 0) + 1;
+        for (const [resource, required] of Object.entries(STARTING_ENDOWMENT)) {
+          const found = countNear(world, tc, resource as never, ENDOWMENT_RADIUS);
+          ok(
+            found >= required,
+            `graine ${seed}, royaume ${owner} : ${found} ${resource} à portée, ${required} exigés`,
+          );
+        }
       }
-      return counts;
-    };
+    }
+  });
 
-    // Miroir strict : aucun camp ne démarre avantagé.
-    deepStrictEqual(nearBase(0), nearBase(1));
+  /**
+   * À défaut du miroir strict d'avant, l'écart entre les deux camps doit
+   * rester dans le bruit sur les ressources qui décident d'une partie.
+   *
+   * Le bois est volontairement exclu : les grandes forêts poussent où elles
+   * veulent, parce que ce sont elles qui donnent son relief à la carte —
+   * couloirs, contournements, endroits où poser une muraille. Un camp peut
+   * donc en avoir trois fois plus que l'autre à portée, sans que cela change
+   * quoi que ce soit : au-delà de la centaine de tuiles garantie, le bois
+   * n'est jamais le goulet d'étranglement d'un début de partie.
+   */
+  it('les deux royaumes reçoivent une dotation comparable en ressources rares', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const world = createWorld(seed);
+      const centres = [0, 1].map(
+        (owner) =>
+          [...world.entities.values()].find(
+            (e) => e.owner === owner && e.defId === 'centre_ville',
+          ) as Entity,
+      );
+
+      for (const resource of ['food', 'gold', 'stone'] as const) {
+        const [a, b] = centres.map((tc) => countNear(world, tc, resource, ENDOWMENT_RADIUS)) as [
+          number,
+          number,
+        ];
+        const ratio = Math.min(a, b) / Math.max(a, b);
+        ok(ratio >= 0.55, `graine ${seed} : ${a} ${resource} contre ${b}, écart trop grand`);
+      }
+    }
+  });
+
+  it('les bases ne sont ni collées l\'une à l\'autre ni au bord de la carte', () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const world = createWorld(seed);
+      const centres = [0, 1].map(
+        (owner) =>
+          [...world.entities.values()].find(
+            (e) => e.owner === owner && e.defId === 'centre_ville',
+          ) as Entity,
+      );
+
+      const [a, b] = centres as [Entity, Entity];
+      ok(Math.hypot(a.x - b.x, a.y - b.y) >= 50, `graine ${seed} : bases trop proches`);
+
+      for (const tc of centres) {
+        const margin = Math.min(tc.x, tc.y, world.width - tc.x, world.height - tc.y);
+        ok(margin >= 10, `graine ${seed} : une base est collée au bord (${margin} tuiles)`);
+      }
+    }
+  });
+
+  it('le royaume adverse ne se pose pas deux fois au même endroit', () => {
+    // Sinon « au hasard » ne veut rien dire : c'est une carte fixe déguisée.
+    const positions = new Set<string>();
+    for (let seed = 1; seed <= 20; seed++) {
+      const world = createWorld(seed);
+      const tc = [...world.entities.values()].find(
+        (e) => e.owner === 1 && e.defId === 'centre_ville',
+      ) as Entity;
+      positions.add(`${tc.x},${tc.y}`);
+    }
+    ok(positions.size >= 18, `seulement ${positions.size} positions distinctes sur 20 graines`);
   });
 });
 
@@ -449,6 +525,16 @@ describe('ordres de groupe', () => {
 
   it('déploie le groupe en formation au lieu de l\'entasser sur un point', () => {
     const world = createWorld();
+
+    // On dégage la zone visée : depuis que la carte est tirée au sort, une
+    // forêt peut tomber sur le point de ralliement, et deux unités partageraient
+    // alors le même emplacement de repli. C'est le comportement voulu — mais ce
+    // n'est pas ce que ce test mesure.
+    for (const e of [...world.entities.values()]) {
+      if (e.kind === 'resource' && Math.hypot(e.x - 32, e.y - 32) < 8) world.entities.delete(e.id);
+    }
+    rebuildBlocked(world);
+
     const soldiers = sandboxSpawn(world, 'soldat', 0, 20, 20, 9);
 
     orderGroup(world, soldiers, null, 32, 32);

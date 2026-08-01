@@ -105,9 +105,36 @@ check('le monde est peuplé', (await state()).entities > 100);
 await shot('01-demarrage');
 
 // — Sélection au rectangle —
-await page.mouse.move(640, 400);
+//
+// Le rectangle est calculé d'après la position réelle des paysans, jamais
+// écrit en dur : depuis que la carte est tirée au sort, la base n'est plus au
+// même endroit d'une partie à l'autre, et des coordonnées fixes feraient
+// échouer ce test pour une raison sans rapport avec la sélection.
+const villagerBox = await page.evaluate(async () => {
+  const { world, renderer } = window.rts;
+  const { tileToScreen } = await import('/src/sim/grid.ts');
+
+  const points = [...world.entities.values()]
+    .filter((e) => e.kind === 'unit' && e.owner === 0)
+    .map((e) => {
+      const p = tileToScreen(e.x, e.y);
+      return {
+        x: renderer.world.position.x + p.x * renderer.world.scale.x,
+        y: renderer.world.position.y + p.y * renderer.world.scale.y,
+      };
+    });
+
+  return {
+    minX: Math.min(...points.map((p) => p.x)),
+    maxX: Math.max(...points.map((p) => p.x)),
+    minY: Math.min(...points.map((p) => p.y)),
+    maxY: Math.max(...points.map((p) => p.y)),
+  };
+});
+
+await page.mouse.move(villagerBox.minX - 40, villagerBox.minY - 50);
 await page.mouse.down();
-await page.mouse.move(820, 520, { steps: 8 });
+await page.mouse.move(villagerBox.maxX + 40, villagerBox.maxY + 20, { steps: 8 });
 await page.mouse.up();
 await page.waitForTimeout(300);
 check('la sélection au rectangle attrape les paysans', (await state()).selection === 3);
@@ -118,23 +145,43 @@ const tree = await screenPositionOf('wood');
 check('un bosquet est accessible depuis la base', tree !== null);
 await page.mouse.click(tree.x, tree.y, { button: 'right' });
 await page.locator('.speeds button[data-speed="8"]').click();
-await page.waitForTimeout(9000);
+// Large, et il faut qu'il le soit : la carte étant tirée au sort, le bosquet
+// le plus proche peut être à quatre tuiles comme à quinze, et un aller-retour
+// complet — marche, coupe, retour au dépôt — prend alors une quarantaine de
+// secondes de jeu. Le conteneur n'ayant pas de GPU, la vitesse ×8 n'en vaut
+// qu'environ cinq.
+await page.waitForTimeout(16000);
 const woodAfter = (await state()).wood;
 check('les paysans récoltent et déposent', woodAfter > woodBefore, `bois ${woodBefore} → ${Math.floor(woodAfter)}`);
 await shot('02-recolte');
 
 // — Production —
+//
+// Le centre-ville est sélectionné par le manche de débogage et non au clic :
+// un paysan planté devant lui est désigné à sa place — c'est le comportement
+// voulu, celui qui est devant l'emporte — et on se retrouvait alors à cliquer
+// sur le menu de construction en croyant produire une unité.
 await page.locator('.speeds button[data-speed="1"]').click();
-const townCenter = await screenPositionOf('townCenter');
-await page.mouse.click(townCenter.x, townCenter.y - 20);
+await page.evaluate(() => {
+  const { world, selection } = window.rts;
+  const tc = [...world.entities.values()].find(
+    (e) => e.owner === 0 && e.defId === 'centre_ville',
+  );
+  selection.clear();
+  if (tc) selection.add(tc.id);
+});
 await page.waitForTimeout(300);
 const buttons = await page.locator('#actions-panel button').count();
 check('le centre-ville propose ses productions', buttons >= 4, `${buttons} boutons`);
 
 const before = (await state()).saphir;
-await page.locator('#actions-panel button').first().click();
+await page.locator('#actions-panel button', { hasText: 'Paysan' }).first().click();
 await page.locator('.speeds button[data-speed="8"]').click();
-await page.waitForTimeout(4000);
+// Le temps d'attente est large : sans GPU, le navigateur du conteneur ne tient
+// pas la vitesse ×8 demandée — l'horloge du jeu avance environ cinq fois plus
+// vite que le temps réel, pas huit. Quatre secondes ne suffisaient pas aux
+// vingt secondes de formation d'un paysan.
+await page.waitForTimeout(7000);
 check('un paysan sort de la file de production', (await state()).saphir > before);
 
 // — Muraille posée au glisser —

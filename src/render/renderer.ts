@@ -44,6 +44,9 @@ export class Renderer {
   readonly world: Container = new Container();
 
   private terrain: TilingSprite | null = null;
+  /** Tranche et découpe du plateau : voir `buildLayers`. */
+  private slab: Graphics | null = null;
+  private terrainMask: Graphics | null = null;
   private fog: GridLayer | null = null;
   private entityLayer = new Container();
   private silhouetteLayer = new Graphics();
@@ -89,6 +92,8 @@ export class Renderer {
    */
   buildLayers(world: World): void {
     this.terrain?.destroy();
+    this.slab?.destroy();
+    this.terrainMask?.destroy();
     this.fog?.sprite.destroy();
 
     // ── Sol ───────────────────────────────────────────────────────────────
@@ -110,6 +115,33 @@ export class Renderer {
     // se décale d'une demi-tuile par rapport aux entités.
     this.terrain.tilePosition.set(-bounds.x, -bounds.y);
 
+    // ── Bord de carte ─────────────────────────────────────────────────────
+    //
+    // La carte est un losange, le motif de sol un rectangle : hors du losange,
+    // la prairie continuait dans le vide et la carte n'avait plus de fin.
+    //
+    // Deux objets règlent la question. Un masque découpe le sol exactement sur
+    // le losange jouable. Et sous lui, le même losange décalé vers le bas fait
+    // office de **tranche** : le plateau a une épaisseur, comme une dalle posée
+    // sur le fond, au lieu d'être une découpe de papier. C'est ce qui donne au
+    // bord un air voulu plutôt qu'accidentel.
+    const outline = mapOutline(world);
+
+    this.terrainMask = new Graphics().poly(outline).fill({ color: 0xffffff });
+    this.terrain.mask = this.terrainMask;
+
+    // Deux copies du losange décalées vers le bas, la plus profonde en premier :
+    // la terre sombre en dessous, la terre éclairée juste sous l'herbe. Deux
+    // valeurs suffisent à donner une épaisseur — une seule ne fait qu'un trait.
+    const sink = (offset: number): number[] =>
+      outline.map((value, index) => (index % 2 === 1 ? value + offset : value));
+
+    this.slab = new Graphics()
+      .poly(sink(MAP_THICKNESS))
+      .fill({ color: PALETTE.edgeDeep })
+      .poly(sink(Math.round(MAP_THICKNESS * 0.45)))
+      .fill({ color: PALETTE.edge });
+
     // ── Brouillard ────────────────────────────────────────────────────────
     this.fog = createGridLayer(world.width, world.height);
 
@@ -125,7 +157,11 @@ export class Renderer {
     // visible, en plus terne.
     this.world.removeChildren();
     this.world.addChild(
+      this.slab,
       this.terrain,
+      // Un masque doit appartenir à la scène pour être pris en compte ; il
+      // n'est pas dessiné pour autant.
+      this.terrainMask,
       this.fog.sprite,
       this.entityLayer,
       this.silhouetteLayer,
@@ -578,6 +614,25 @@ function spriteBox(entity: Entity): {
     // Décalage du centre du sprite par rapport au point d'ancrage au sol.
     offsetY: art.anchorY - art.height / 2,
   };
+}
+
+/** Épaisseur apparente du plateau, en pixels. */
+const MAP_THICKNESS = 10;
+
+/**
+ * Le losange jouable, en pixels écran, sous forme de polygone plat.
+ *
+ * Les quatre coins de la grille projetés : c'est la limite exacte du monde,
+ * celle qui sert à la fois de masque au sol et de contour à sa tranche.
+ */
+function mapOutline(world: World): number[] {
+  const corners = [
+    tileToScreen(0, 0),
+    tileToScreen(world.width, 0),
+    tileToScreen(world.width, world.height),
+    tileToScreen(0, world.height),
+  ];
+  return corners.flatMap((c) => [c.x, c.y]);
 }
 
 /** Rectangle, en pixels écran, couvert par la carte entière. */

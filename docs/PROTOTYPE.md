@@ -20,10 +20,30 @@ totale de l'adversaire, GDD §8).
   pixel par pixel dans `src/art` et regroupés sur une planche de référence
   (`npm run sprites`). Palette chaude verrouillée, lumière au nord-ouest,
   contour unique — voir la [charte graphique](ART.md).
-- **Carte isométrique** de 120 × 120 tuiles, générée à partir d'une graine :
-  deux bases en diagonale opposée, dotation de départ strictement miroir
-  (aucun camp n'est avantagé), zones neutres au centre pour donner un enjeu à
-  l'expansion.
+- **Carte isométrique** de 120 × 120 tuiles, **tirée au sort à chaque partie**
+  à partir d'une graine : l'orientation des zones autour de chaque base, la
+  position du royaume adverse et tout le terrain neutre changent d'une partie à
+  l'autre. La reconnaissance redevient un vrai enjeu — on ne sait plus d'avance
+  où frapper.
+
+  Ce que le hasard ne décide jamais, c'est si la partie est jouable. Chaque
+  base est **entourée** de ses six zones de départ, réparties dans six secteurs
+  angulaires distincts, et non servie d'un seul côté. Les quantités sont tirées
+  une seule fois et servies aux deux royaumes, si bien que l'orientation varie
+  mais pas la dotation. Une vérification finale complète ce que le tirage n'a
+  pas donné : aucune graine ne peut produire un départ sans or. Les zones
+  neutres se tiennent à l'écart des deux camps — un filon tombé à dix tuiles
+  d'une base n'est pas un enjeu territorial, c'est un cadeau. Et les bases ne
+  sont jamais collées : au moins 55 tuiles d'écart, 14 du bord.
+
+  La graine s'affiche dans le journal au lancement, et `?seed=1234` la force —
+  de quoi rejouer une carte ou reproduire un bug. C'est aussi la valeur que
+  l'hôte diffusera aux autres joueurs en multijoueur : `Math.random` reste banni
+  de la simulation, la graine est une entrée tirée une fois, jamais un tirage en
+  cours de partie.
+- **Bord de carte net** : le losange jouable découpe le sol, et sa tranche —
+  deux valeurs de terre décalées vers le bas — donne au plateau une épaisseur.
+  Le motif de prairie ne continue plus dans le vide au-delà des limites.
 - **Zones de ressources d'un seul tenant**, à la manière d'Age of Empires : une
   forêt est une masse compacte que l'on exploite par sa lisière, un filon d'or
   un tas de quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et à
@@ -192,8 +212,10 @@ secondes — dont une de quinze minutes contre l'IA, à chaque exécution de
 `npm test`. C'est aussi ce qui permettra à un serveur de simuler sans rien
 afficher.
 
-**Tout est déterministe.** Aucun `Math.random` (un générateur à graine le
-remplace partout), aucune dépendance à l'horloge système, un pas de simulation
+**Tout est déterministe.** Aucun `Math.random` dans la simulation (un
+générateur à graine le remplace partout) — la seule horloge consultée l'est
+*avant* la partie, pour tirer la graine de la carte, et cette valeur devient
+une entrée comme une autre. Aucune dépendance à l'horloge système, un pas de simulation
 fixe à 20 Hz que la vitesse de jeu ne modifie jamais — accélérer exécute plus
 de pas, jamais des pas plus grands. Un test rejoue dix minutes de partie deux
 fois et compare l'état entité par entité.
@@ -207,7 +229,7 @@ moindre écart de calcul entre deux machines fait diverger la partie.
 ## Tests
 
 ```bash
-npm test                  # 74 vérifications, dont 36 de simulation
+npm test                  # 77 vérifications, dont 39 de simulation
 npm run balance           # rapport d'équilibrage
 npm run typecheck
 node scripts/smoke.mjs    # parcours complet dans un vrai navigateur

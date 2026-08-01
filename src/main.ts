@@ -30,7 +30,20 @@ import { Hud } from './ui/hud.ts';
 
 const PLAYER = 0 as const;
 
-const world: World = createWorld();
+/**
+ * Graine de la partie.
+ *
+ * `Math.random` reste banni **dans** la simulation : la graine est une entrée
+ * tirée une seule fois au lancement, jamais un tirage en cours de partie. Tout
+ * ce qui suit en découle de façon déterministe, si bien qu'une même graine
+ * rejoue exactement la même carte — c'est ce que réclame le lockstep, où
+ * l'hôte diffusera cette valeur aux autres joueurs.
+ *
+ * `?seed=1234` la force, pour rejouer une carte ou reproduire un bug.
+ */
+const seed = Number(new URLSearchParams(location.search).get('seed')) || (Date.now() >>> 0);
+
+const world: World = createWorld(seed);
 const ai = createAi(1);
 const renderer = new Renderer();
 
@@ -364,12 +377,19 @@ async function start(): Promise<void> {
 
   await renderer.init(stage);
   renderer.buildLayers(world);
-  renderer.centerOn(18, 18);
+
+  // Sur le centre-ville du joueur, et non sur des coordonnées écrites en dur :
+  // c'est la seule chose dont on soit sûr sur une carte tirée au sort.
+  const home = [...world.entities.values()].find(
+    (e) => e.owner === PLAYER && e.defId === 'centre_ville',
+  );
+  renderer.centerOn(home?.x ?? world.width / 2, home?.y ?? world.height / 2);
   setupInput(renderer.app.canvas);
 
   exposeDebugHandle();
 
   logEvent(world, 'Partie lancée. Clic droit sur un arbre pour envoyer un paysan couper du bois.');
+  logEvent(world, `Carte n° ${seed} — ajoutez ?seed=${seed} à l'adresse pour la rejouer.`);
 
   let accumulator = 0;
 
