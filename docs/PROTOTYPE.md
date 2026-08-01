@@ -44,7 +44,9 @@ totale de l'adversaire, GDD §8).
 - **Construction** des dix bâtiments, avec aperçu de l'emplacement et chantier
   destructible pendant qu'il se bâtit. Les **murailles se posent au glisser** :
   un trait de souris pose toute la file, les cases occupées sont sautées, et le
-  bâtisseur enchaîne seul d'un segment au suivant.
+  bâtisseur enchaîne seul d'un segment au suivant. Chaque segment **se raccorde
+  à ses voisines** : il tend un bras vers le milieu de chaque côté partagé, si
+  bien que le mur est continu, avec une tour aux angles et aux extrémités.
 - **Production** d'unités en file d'attente, avec point de ralliement.
 - **Progression d'âge**, y compris ses prérequis en bâtiments. Le bandeau
   indique en clair ce qui manque encore — « Il manque 300 nourriture et

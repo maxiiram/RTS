@@ -142,6 +142,138 @@ export function buildingContext(defId: string, color: number, ghost = false): Gr
   });
 }
 
+/**
+ * Vecteurs, en pixels écran, du centre d'une tuile vers le milieu de chacun de
+ * ses quatre côtés. Ce sont les demi-pas de la projection isométrique.
+ */
+const HALF_STEP = {
+  px: { x: TILE_WIDTH / 4, y: TILE_HEIGHT / 4 },
+  nx: { x: -TILE_WIDTH / 4, y: -TILE_HEIGHT / 4 },
+  py: { x: -TILE_WIDTH / 4, y: TILE_HEIGHT / 4 },
+  ny: { x: TILE_WIDTH / 4, y: -TILE_HEIGHT / 4 },
+} as const;
+
+export type WallSide = keyof typeof HALF_STEP;
+
+/** Bits du masque de raccordement d'une muraille. */
+export const WALL_LINKS: Record<WallSide, number> = { px: 1, nx: 2, py: 4, ny: 8 };
+
+/**
+ * Muraille raccordée à ses voisines.
+ *
+ * Un segment dessiné comme un cube isolé donne un pointillé de blocs, pas une
+ * enceinte. Chaque segment tend donc un bras vers chacune de ses voisines,
+ * jusqu'au milieu du côté partagé : deux segments adjacents se rejoignent
+ * exactement, et le mur devient continu. Un segment isolé, ou en bout de mur,
+ * garde une tour à son centre — ce qui marque naturellement les angles et les
+ * extrémités.
+ *
+ * `links` est un masque des côtés raccordés (voir `WALL_LINKS`), ce qui donne
+ * seize variantes possibles, toutes mises en cache.
+ */
+export function wallContext(color: number, links: number, ghost = false): GraphicsContext {
+  return cached(`wall:${color}:${links}:${ghost}`, () => {
+    const ctx = new GraphicsContext();
+    const alpha = ghost ? 0.45 : 1;
+
+    const height = 20;
+    // Demi-épaisseur du mur, exprimée dans l'axe du sol perpendiculaire au bras.
+    const thickness = 0.38;
+
+    const top = PALETTE.wall;
+    const rightFace = PALETTE.wallDark;
+    const leftFace = shade(PALETTE.wallSide, 0.88);
+
+    /** Trace un bras du centre vers le milieu d'un côté. */
+    const arm = (side: WallSide): void => {
+      const step = HALF_STEP[side];
+      // L'épaisseur suit l'autre axe du sol : un bras est-ouest s'épaissit
+      // nord-sud, et réciproquement.
+      const across = side === 'px' || side === 'nx' ? HALF_STEP.py : HALF_STEP.px;
+      const ox = across.x * thickness;
+      const oy = across.y * thickness;
+
+      const a = { x: -ox, y: -oy };
+      const b = { x: ox, y: oy };
+      const c = { x: step.x + ox, y: step.y + oy };
+      const d = { x: step.x - ox, y: step.y - oy };
+
+      // Deux faces latérales, puis le dessus par-dessus.
+      ctx.poly([b.x, b.y, c.x, c.y, c.x, c.y - height, b.x, b.y - height]).fill({ color: rightFace, alpha });
+      ctx.poly([a.x, a.y, d.x, d.y, d.x, d.y - height, a.x, a.y - height]).fill({ color: leftFace, alpha });
+      ctx
+        .poly([
+          a.x, a.y - height,
+          b.x, b.y - height,
+          c.x, c.y - height,
+          d.x, d.y - height,
+        ])
+        .fill({ color: top, alpha });
+    };
+
+    /** Tour au centre : marque les extrémités et les angles. */
+    const post = (): void => {
+      const size = 0.5;
+      const ax = { x: HALF_STEP.px.x * size, y: HALF_STEP.px.y * size };
+      const ay = { x: HALF_STEP.py.x * size, y: HALF_STEP.py.y * size };
+      const postHeight = height + 6;
+
+      const corners = [
+        { x: -ax.x - ay.x, y: -ax.y - ay.y },
+        { x: ax.x - ay.x, y: ax.y - ay.y },
+        { x: ax.x + ay.x, y: ax.y + ay.y },
+        { x: -ax.x + ay.x, y: -ax.y + ay.y },
+      ];
+
+      const [back, right, front, left] = corners as [
+        { x: number; y: number },
+        { x: number; y: number },
+        { x: number; y: number },
+        { x: number; y: number },
+      ];
+
+      ctx
+        .poly([right.x, right.y, front.x, front.y, front.x, front.y - postHeight, right.x, right.y - postHeight])
+        .fill({ color: rightFace, alpha });
+      ctx
+        .poly([left.x, left.y, front.x, front.y, front.x, front.y - postHeight, left.x, left.y - postHeight])
+        .fill({ color: leftFace, alpha });
+      ctx
+        .poly([
+          back.x, back.y - postHeight,
+          right.x, right.y - postHeight,
+          front.x, front.y - postHeight,
+          left.x, left.y - postHeight,
+        ])
+        .fill({ color: top, alpha })
+        .stroke({ color: PALETTE.outline, width: 1, alpha });
+
+      // Bannière du royaume, pour distinguer les murs des deux camps.
+      ctx.rect(-2, -postHeight - 5, 4, 4).fill({ color, alpha });
+    };
+
+    addShadow(ctx, 10, 5);
+
+    // Les bras qui s'éloignent de la caméra passent derrière la tour.
+    if (links & WALL_LINKS.nx) arm('nx');
+    if (links & WALL_LINKS.ny) arm('ny');
+
+    const connections = [WALL_LINKS.px, WALL_LINKS.nx, WALL_LINKS.py, WALL_LINKS.ny].filter(
+      (bit) => links & bit,
+    ).length;
+    const straight =
+      (links === (WALL_LINKS.px | WALL_LINKS.nx)) || (links === (WALL_LINKS.py | WALL_LINKS.ny));
+
+    // Une tour partout sauf au milieu d'une ligne droite, qui reste lisse.
+    if (!straight || connections === 0) post();
+
+    if (links & WALL_LINKS.px) arm('px');
+    if (links & WALL_LINKS.py) arm('py');
+
+    return ctx;
+  });
+}
+
 export function resourceContext(resource: string): GraphicsContext {
   return cached(`resource:${resource}`, () => {
     const ctx = new GraphicsContext();

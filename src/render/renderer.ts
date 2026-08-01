@@ -15,7 +15,7 @@ import { tileToScreen } from '../sim/grid.ts';
 import type { Entity, PlayerId, World } from '../sim/types.ts';
 import { currentAction, isEntityVisible, visibilityAt } from '../sim/world.ts';
 import { ACTION_COLORS, PALETTE } from './palette.ts';
-import { buildingContext, resourceContext, unitContext } from './shapes.ts';
+import { buildingContext, resourceContext, unitContext, wallContext, WALL_LINKS } from './shapes.ts';
 
 interface EntityView {
   container: Container;
@@ -41,6 +41,12 @@ export class Renderer {
 
   /** Dernier état du brouillard dessiné, pour ne le refaire qu'au besoin. */
   private fogVersion = -1;
+
+  /**
+   * Murailles indexées par tuile, reconstruit à chaque image.
+   * Sert à savoir de quels côtés un segment doit se raccorder.
+   */
+  private walls = new Map<string, number>();
 
   private cameraX = 0;
   private cameraY = 0;
@@ -150,6 +156,8 @@ export class Renderer {
     const seen = new Set<number>();
     const drawn: Entity[] = [];
 
+    this.indexWalls(world);
+
     for (const entity of world.entities.values()) {
       if (!isEntityVisible(world, player, entity)) continue;
 
@@ -182,6 +190,37 @@ export class Renderer {
     this.drawSilhouettes(world, drawn);
     this.drawGhost(ghost);
     this.drawFog(world, player);
+  }
+
+  /**
+   * Recense les murailles par tuile, avec leur propriétaire.
+   *
+   * Un segment ne se raccorde qu'aux murailles du même royaume : deux enceintes
+   * adverses qui se touchent restent deux murs distincts.
+   */
+  private indexWalls(world: World): void {
+    this.walls.clear();
+
+    for (const entity of world.entities.values()) {
+      if (entity.defId !== 'muraille' || entity.owner === null) continue;
+      this.walls.set(`${Math.floor(entity.x)},${Math.floor(entity.y)}`, entity.owner);
+    }
+  }
+
+  /** Masque des côtés par lesquels une muraille touche une voisine alliée. */
+  private wallLinks(entity: Entity): number {
+    const x = Math.floor(entity.x);
+    const y = Math.floor(entity.y);
+    const owner = entity.owner;
+
+    const linked = (tx: number, ty: number): boolean => this.walls.get(`${tx},${ty}`) === owner;
+
+    let links = 0;
+    if (linked(x + 1, y)) links |= WALL_LINKS.px;
+    if (linked(x - 1, y)) links |= WALL_LINKS.nx;
+    if (linked(x, y + 1)) links |= WALL_LINKS.py;
+    if (linked(x, y - 1)) links |= WALL_LINKS.ny;
+    return links;
   }
 
   /** Rectangle du monde couvert par l'écran, en pixels, avec une marge. */
@@ -267,7 +306,11 @@ export class Renderer {
   private syncEntity(world: World, entity: Entity, selected: boolean): EntityView {
     const color = entity.owner === null ? 0xffffff : world.players[entity.owner].color;
     const isSite = entity.kind === 'building' && entity.buildProgress < 1;
-    const visualKey = `${entity.kind}:${entity.defId}:${color}:${isSite}`;
+
+    // Une muraille change de forme quand une voisine apparaît ou tombe : son
+    // masque de raccordement fait donc partie de l'identité de son visuel.
+    const links = entity.defId === 'muraille' ? this.wallLinks(entity) : 0;
+    const visualKey = `${entity.kind}:${entity.defId}:${color}:${isSite}:${links}`;
 
     let view = this.views.get(entity.id);
 
@@ -278,7 +321,9 @@ export class Renderer {
         entity.kind === 'unit'
           ? unitContext(entity.defId, color)
           : entity.kind === 'building'
-            ? buildingContext(entity.defId, color, isSite)
+            ? entity.defId === 'muraille'
+              ? wallContext(color, links, isSite)
+              : buildingContext(entity.defId, color, isSite)
             : resourceContext(entity.defId);
 
       const body = new Graphics(context);
