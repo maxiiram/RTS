@@ -74,12 +74,12 @@ export function drawBuilding(defId: string, kingdomColor: number, underConstruct
   const halfWidth = ((footprint.w + footprint.h) * TILE_WIDTH) / 4;
   const halfHeight = ((footprint.w + footprint.h) * TILE_HEIGHT) / 4;
 
-  const width = halfWidth * 2 + 4;
-  const height = halfHeight * 2 + style.wallHeight + style.roofHeight + 8;
+  const width = halfWidth * 2 + 6;
+  const height = halfHeight * 2 + style.wallHeight + style.roofHeight + 24;
   const canvas = new PixelCanvas(width, height);
 
   const cx = Math.floor(width / 2);
-  const baseY = height - halfHeight - 2;
+  const baseY = height - halfHeight - 4;
 
   if (defId === 'ferme') {
     drawField(canvas, cx, baseY, halfWidth, halfHeight);
@@ -90,17 +90,25 @@ export function drawBuilding(defId: string, kingdomColor: number, underConstruct
   const team = kingdomShades(kingdomColor);
   const material = MATERIALS[style.material];
 
-  canvas.shadow(cx, baseY + 2, halfWidth - 2, halfHeight - 1, PALETTE.shadow);
+  canvas.shadow(cx, baseY + 2, halfWidth, halfHeight, PALETTE.shadow);
 
   const wallTop = baseY - style.wallHeight;
 
-  // ── Murs : deux faces visibles, celle de droite dans l'ombre ────────────
-  drawWallFaces(canvas, cx, baseY, halfWidth, halfHeight, style.wallHeight, material);
+  // ── Façades ────────────────────────────────────────────────────────────
+  //
+  // Seules les deux faces tournées vers le bas de l'écran sont visibles :
+  // l'ouest-sud, éclairée, et la sud-est, dans l'ombre. Les deux faces
+  // arrière n'ont aucune raison d'être dessinées — elles l'étaient, et c'est
+  // pour ça que les bâtiments semblaient n'avoir aucun mur : on voyait leur
+  // dos, entièrement masqué par le toit.
+  drawFacade(canvas, cx, baseY, halfWidth, halfHeight, style, material, 'left');
+  drawFacade(canvas, cx, baseY, halfWidth, halfHeight, style, material, 'right');
 
-  if (style.material === 'stone') {
-    drawMasonry(canvas, cx, wallTop, halfWidth, halfHeight, style.wallHeight, material.dark);
-  } else if (style.material === 'wood') {
-    drawTimbers(canvas, cx, wallTop, halfWidth, halfHeight, style.wallHeight, PALETTE.woodDark);
+  // Corniche : la ligne qui sépare le mur du toit, sur les deux faces.
+  for (let dx = 0; dx <= halfWidth; dx++) {
+    const drop = Math.round((dx * halfHeight) / halfWidth);
+    canvas.set(cx - halfWidth + dx, wallTop + drop, material.dark);
+    canvas.set(cx + halfWidth - dx, wallTop + drop, PALETTE.outline);
   }
 
   if (style.crenellations) {
@@ -114,18 +122,23 @@ export function drawBuilding(defId: string, kingdomColor: number, underConstruct
         ? { light: team.light, main: team.main, dark: team.dark }
         : style.roof === 'thatch'
           ? { light: PALETTE.thatchLight, main: PALETTE.thatch, dark: PALETTE.thatchDark }
-          : { light: PALETTE.stoneDark, main: PALETTE.stoneShadow, dark: shade(PALETTE.stoneShadow, 0.75) };
+          : { light: PALETTE.stoneDark, main: PALETTE.stoneShadow, dark: shade(PALETTE.stoneShadow, 0.72) };
 
-    drawRoof(canvas, cx, wallTop, halfWidth, halfHeight, style.roofHeight, roofColors);
+    drawRoof(canvas, cx, wallTop, halfWidth, halfHeight, style.roofHeight, roofColors, style.roof);
   } else {
-    // Sans toit, le sommet des murs est une terrasse : c'est le cas de la tour.
+    // Sans toit, le sommet des murs est une terrasse dallée : c'est la tour.
     canvas.isoDiamond(cx, wallTop, halfWidth, halfHeight, material.light);
+    for (let dx = -halfWidth + 4; dx < halfWidth - 4; dx += 6) {
+      canvas.line(cx + dx, wallTop - Math.round((Math.abs(dx) * halfHeight) / halfWidth) + 1,
+        cx + dx, wallTop + Math.round((halfHeight * (halfWidth - Math.abs(dx))) / halfWidth) - 1,
+        material.main);
+    }
   }
 
-  if (style.door) drawDoor(canvas, cx, baseY, style.material);
-  if (style.chimney) drawChimney(canvas, cx - halfWidth / 2, wallTop - style.roofHeight);
+  if (style.door) drawDoor(canvas, cx, baseY, halfHeight, style.material);
+  if (style.chimney) drawChimney(canvas, cx - Math.round(halfWidth * 0.45), wallTop - style.roofHeight + 6);
   if (style.banner) {
-    drawRoofBanner(canvas, cx + halfWidth / 2 - 2, wallTop - style.roofHeight, team.main, team.light);
+    drawRoofBanner(canvas, cx, wallTop - halfHeight - style.roofHeight, team.main, team.light);
   }
 
   canvas.outline(PALETTE.outline);
@@ -134,63 +147,113 @@ export function drawBuilding(defId: string, kingdomColor: number, underConstruct
   return canvas.toSprite(cx, baseY);
 }
 
-function drawWallFaces(
+/**
+ * Une façade complète : soubassement, parement, ouvertures.
+ *
+ * `side` désigne laquelle des deux faces visibles on peint. La gauche reçoit
+ * la lumière, la droite est dans l'ombre — comme partout ailleurs dans le jeu.
+ */
+function drawFacade(
   canvas: PixelCanvas,
   cx: number,
   baseY: number,
   halfWidth: number,
   halfHeight: number,
-  wallHeight: number,
+  style: BuildingStyle,
   material: { light: number; main: number; dark: number },
+  side: 'left' | 'right',
 ): void {
-  // Face gauche (éclairée) et face droite (dans l'ombre). Chaque face suit la
-  // pente 2:1 du losange au sol.
-  for (let dx = 0; dx < halfWidth; dx++) {
-    const drop = Math.floor(dx / 2);
+  const lit = side === 'left';
+  const body = lit ? material.main : shade(material.main, 0.74);
+  const bright = lit ? material.light : shade(material.light, 0.74);
+  const deep = lit ? material.dark : shade(material.dark, 0.74);
 
-    const leftX = cx - halfWidth + dx;
-    const leftTop = baseY - drop - wallHeight;
-    canvas.vLine(leftX, leftTop, wallHeight + drop, material.main);
+  const wallHeight = style.wallHeight;
+  const columns: Array<{ x: number; groundY: number }> = [];
 
-    const rightX = cx + halfWidth - 1 - dx;
-    const rightTop = baseY - drop - wallHeight;
-    canvas.vLine(rightX, rightTop, wallHeight + drop, material.dark);
+  for (let dx = 0; dx <= halfWidth; dx++) {
+    const drop = Math.round((dx * halfHeight) / halfWidth);
+    const x = lit ? cx - halfWidth + dx : cx + halfWidth - dx;
+    columns.push({ x, groundY: baseY + (lit ? drop : drop) });
   }
-}
 
-function drawMasonry(
-  canvas: PixelCanvas,
-  cx: number,
-  wallTop: number,
-  halfWidth: number,
-  halfHeight: number,
-  wallHeight: number,
-  color: number,
-): void {
-  // Assises de pierre : une ligne tous les cinq pixels, suivant la pente.
-  for (let row = 5; row < wallHeight; row += 5) {
-    for (let dx = 0; dx < halfWidth; dx++) {
-      const drop = Math.floor(dx / 2);
-      canvas.set(cx - halfWidth + dx, wallTop + row + drop, color);
-      canvas.set(cx + halfWidth - 1 - dx, wallTop + row + drop, shade(color, 0.85));
+  // Parement plein
+  for (const column of columns) {
+    canvas.vLine(column.x, column.groundY - wallHeight, wallHeight, body);
+  }
+
+  // Soubassement de pierre : trois assises plus sombres, présentes sur tous
+  // les bâtiments quel que soit leur matériau. C'est ce qui les assied au sol.
+  for (const column of columns) {
+    canvas.vLine(column.x, column.groundY - 4, 4, lit ? PALETTE.stoneDark : PALETTE.stoneShadow);
+    canvas.set(column.x, column.groundY - 4, lit ? PALETTE.stone : PALETTE.stoneDark);
+  }
+
+  if (style.material === 'stone') {
+    // Appareil de pierre : assises horizontales et joints verticaux décalés
+    // d'une rangée à l'autre, comme un vrai mur monté à la truelle.
+    for (let row = 5; row < wallHeight - 3; row += 5) {
+      for (const column of columns) {
+        canvas.set(column.x, column.groundY - row, deep);
+      }
+    }
+    for (let row = 5; row < wallHeight - 3; row += 5) {
+      const offset = (row / 5) % 2 === 0 ? 0 : 4;
+      for (let i = offset; i < columns.length; i += 8) {
+        const column = columns[i];
+        if (!column) continue;
+        canvas.vLine(column.x, column.groundY - row, 5, deep);
+      }
+    }
+  } else if (style.material === 'wood') {
+    // Colombage : sablières haute et basse, poteaux réguliers, écharpes en
+    // diagonale. Le remplissage clair entre les bois fait le reste.
+    for (const column of columns) {
+      canvas.vLine(column.x, column.groundY - wallHeight + 1, 2, PALETTE.woodDark);
+      canvas.vLine(column.x, column.groundY - 6, 2, PALETTE.woodDark);
+    }
+    for (let i = 2; i < columns.length; i += 9) {
+      const column = columns[i];
+      if (!column) continue;
+      canvas.vLine(column.x, column.groundY - wallHeight, wallHeight - 4, PALETTE.woodDark);
+      canvas.vLine(column.x + (lit ? 1 : -1), column.groundY - wallHeight, wallHeight - 4, PALETTE.wood);
+    }
+    // Remplissage clair entre deux poteaux
+    for (let i = 0; i < columns.length; i++) {
+      if (i % 9 < 3 || i % 9 > 7) continue;
+      const column = columns[i];
+      if (!column) continue;
+      canvas.vLine(column.x, column.groundY - wallHeight + 3, wallHeight - 10, bright);
+    }
+  } else {
+    // Enduit : quelques nuances verticales pour éviter l'aplat mort.
+    for (let i = 3; i < columns.length; i += 11) {
+      const column = columns[i];
+      if (!column) continue;
+      canvas.vLine(column.x, column.groundY - wallHeight + 2, wallHeight - 7, bright);
     }
   }
-}
 
-function drawTimbers(
-  canvas: PixelCanvas,
-  cx: number,
-  wallTop: number,
-  halfWidth: number,
-  halfHeight: number,
-  wallHeight: number,
-  color: number,
-): void {
-  // Colombages : poteaux verticaux espacés, comme sur une grange.
-  for (let dx = 3; dx < halfWidth; dx += 7) {
-    const drop = Math.floor(dx / 2);
-    canvas.vLine(cx - halfWidth + dx, wallTop + drop, wallHeight, color);
-    canvas.vLine(cx + halfWidth - 1 - dx, wallTop + drop, wallHeight, shade(color, 0.85));
+  // Fenêtres, seulement si le mur est assez haut pour en porter.
+  if (wallHeight >= 16) {
+    const positions = halfWidth > 26 ? [0.28, 0.62] : [0.45];
+    for (const t of positions) {
+      const index = Math.round(t * (columns.length - 1));
+      const column = columns[index];
+      if (!column) continue;
+
+      const top = column.groundY - wallHeight + 6;
+      for (let k = 0; k < 5; k++) {
+        const neighbour = columns[index + k];
+        if (!neighbour) continue;
+        canvas.vLine(neighbour.x, top + Math.round((k * halfHeight) / halfWidth), 6, PALETTE.outline);
+      }
+      // Encadrement clair et appui, qui donnent l'épaisseur du mur.
+      const frame = columns[index - 1];
+      if (frame) canvas.vLine(frame.x, top - 1 + Math.round((-1 * halfHeight) / halfWidth), 8, bright);
+      const sill = columns[index + 5];
+      if (sill) canvas.vLine(sill.x, top - 1 + Math.round((5 * halfHeight) / halfWidth), 8, bright);
+    }
   }
 }
 
@@ -202,14 +265,22 @@ function drawCrenellations(
   halfHeight: number,
   material: { light: number; main: number; dark: number },
 ): void {
-  // Merlons sur le pourtour du sommet : la silhouette d'une tour de garde.
-  for (let dx = 0; dx < halfWidth; dx += 5) {
-    const drop = Math.floor(dx / 2);
-    canvas.rect(cx - halfWidth + dx, wallTop - 4 + drop, 3, 5, material.light);
-    canvas.rect(cx + halfWidth - 3 - dx, wallTop - 4 + drop, 3, 5, material.main);
+  // Merlons sur les deux arêtes visibles du sommet.
+  for (let dx = 0; dx < halfWidth - 2; dx += 6) {
+    const drop = Math.round((dx * halfHeight) / halfWidth);
+    canvas.rect(cx - halfWidth + dx, wallTop + drop - 5, 3, 6, material.light);
+    canvas.rect(cx + halfWidth - dx - 3, wallTop + drop - 5, 3, 6, shade(material.main, 0.8));
   }
 }
 
+/**
+ * Toiture à quatre pans, avec ses rangs de couverture.
+ *
+ * Les rangs suivent la pente réelle du toit : ils sont tracés d'une arête à
+ * l'autre en interpolant vers le faîte. C'est ce qui distingue une toiture
+ * d'un simple triangle coloré — et ce qui fait lire la tuile, le chaume ou
+ * l'ardoise selon l'espacement et la couleur.
+ */
 function drawRoof(
   canvas: PixelCanvas,
   cx: number,
@@ -218,19 +289,22 @@ function drawRoof(
   halfHeight: number,
   roofHeight: number,
   colors: { light: number; main: number; dark: number },
+  kind: Roof,
 ): void {
-  // Toit en pavillon : quatre pans qui montent des quatre arêtes du sommet des
-  // murs jusqu'à un faîte central. Empiler des losanges de plus en plus petits
-  // donnait une plaque en escalier, pas une toiture ; deux triangles suffisent
-  // à faire lire la pente.
-  const west = { x: cx - halfWidth, y: wallTop };
-  const south = { x: cx, y: wallTop + halfHeight };
-  const east = { x: cx + halfWidth, y: wallTop };
-  const north = { x: cx, y: wallTop - halfHeight };
-  const apex = { x: cx, y: wallTop - halfHeight - roofHeight };
+  // Le toit déborde des murs : sans avancée de toit, un bâtiment paraît
+  // toujours coupé au couteau.
+  const overhang = 3;
+  const rw = halfWidth + overhang;
+  const rh = halfHeight + Math.round(overhang / 2);
 
-  // Pans arrière d'abord : ils ne sont visibles que par leur silhouette, mais
-  // sans eux le toit aurait un trou au-dessus de la ligne de faîte.
+  const west = { x: cx - rw, y: wallTop };
+  const south = { x: cx, y: wallTop + rh };
+  const east = { x: cx + rw, y: wallTop };
+  const north = { x: cx, y: wallTop - rh };
+  const apex = { x: cx, y: wallTop - rh - roofHeight };
+
+  // Pans arrière : invisibles sauf par leur silhouette, mais sans eux le toit
+  // aurait un trou au-dessus de la ligne de faîte.
   canvas.triangle(north.x, north.y, west.x, west.y, apex.x, apex.y, colors.main);
   canvas.triangle(north.x, north.y, east.x, east.y, apex.x, apex.y, colors.dark);
 
@@ -238,47 +312,99 @@ function drawRoof(
   canvas.triangle(west.x, west.y, south.x, south.y, apex.x, apex.y, colors.light);
   canvas.triangle(south.x, south.y, east.x, east.y, apex.x, apex.y, colors.main);
 
-  // Arête de faîtage et débord de toit : ce qui détache le toit des murs.
-  canvas.hLine(cx - 1, apex.y, 3, colors.light);
-  for (let dx = 0; dx < halfWidth; dx++) {
-    const drop = Math.floor((dx * halfHeight) / halfWidth);
-    canvas.set(cx - halfWidth + dx, wallTop + drop, colors.dark);
-    canvas.set(cx + halfWidth - dx, wallTop + drop, colors.dark);
+  // Rangs de couverture, du bas vers le faîte.
+  const spacing = kind === 'thatch' ? 0.22 : 0.14;
+  const courseColor = kind === 'thatch' ? colors.dark : shade(colors.main, 0.82);
+
+  for (let t = spacing; t < 1; t += spacing) {
+    const lerp = (a: { x: number; y: number }) => ({
+      x: a.x + (apex.x - a.x) * t,
+      y: a.y + (apex.y - a.y) * t,
+    });
+
+    const w = lerp(west);
+    const s = lerp(south);
+    const e = lerp(east);
+    canvas.line(w.x, w.y, s.x, s.y, courseColor);
+    canvas.line(s.x, s.y, e.x, e.y, shade(courseColor, 0.85));
+  }
+
+  // Arêtiers : les deux nervures qui descendent du faîte vers les coins.
+  canvas.line(apex.x, apex.y, west.x, west.y, colors.light);
+  canvas.line(apex.x, apex.y, south.x, south.y, colors.light);
+  canvas.line(apex.x, apex.y, east.x, east.y, colors.dark);
+
+  // Faîtage
+  canvas.rect(cx - 1, apex.y - 1, 3, 2, colors.light);
+
+  // Ombre portée sous l'avancée de toit, sur le haut des murs.
+  for (let dx = 0; dx <= halfWidth; dx++) {
+    const drop = Math.round((dx * halfHeight) / halfWidth);
+    canvas.set(cx - halfWidth + dx, wallTop + drop + 1, PALETTE.outline);
+    canvas.set(cx + halfWidth - dx, wallTop + drop + 1, PALETTE.outline);
   }
 }
 
-function drawDoor(canvas: PixelCanvas, cx: number, baseY: number, material: Material): void {
-  const width = 7;
-  const height = 10;
-  const x = cx - Math.floor(width / 2);
-  const y = baseY - height;
+/** Porte en plein cintre, au coin sud — le point le plus proche du joueur. */
+function drawDoor(
+  canvas: PixelCanvas,
+  cx: number,
+  baseY: number,
+  halfHeight: number,
+  material: Material,
+): void {
+  const doorWidth = 9;
+  const doorHeight = 13;
+  const x = cx - Math.floor(doorWidth / 2);
+  const groundY = baseY + halfHeight;
+  const y = groundY - doorHeight;
 
-  canvas.rect(x, y, width, height, PALETTE.woodDark);
-  canvas.rect(x + 1, y + 1, width - 2, height - 1, shade(PALETTE.woodDark, 1.25));
-  // Ferrures
-  canvas.hLine(x + 1, y + 3, width - 2, PALETTE.steelDark);
-  canvas.set(x + width - 2, y + 6, PALETTE.steel);
+  // Encadrement de pierre, systématique : une porte sans chambranle semble
+  // découpée dans le mur. Deux valeurs, pour qu'il ne se lise pas comme une
+  // plaque blanche posée sur la façade.
+  canvas.rect(x - 2, y - 2, doorWidth + 4, doorHeight + 2, PALETTE.stone);
+  canvas.rect(x - 2, y - 2, doorWidth + 4, 2, PALETTE.stoneLight);
+  canvas.vLine(x + doorWidth + 1, y - 1, doorHeight + 1, PALETTE.stoneDark);
 
-  if (material === 'stone') {
-    // Linteau de pierre : sans lui la porte semble découpée dans le mur.
-    canvas.rect(x - 1, y - 2, width + 2, 2, PALETTE.stoneLight);
+  // Vantail à planches verticales
+  canvas.rect(x, y, doorWidth, doorHeight, PALETTE.woodDark);
+  for (let dx = 1; dx < doorWidth; dx += 3) {
+    canvas.vLine(x + dx, y + 1, doorHeight - 1, PALETTE.wood);
   }
+  // Arc en plein cintre
+  canvas.hLine(x + 1, y, doorWidth - 2, PALETTE.wood);
+  canvas.set(x, y + 1, PALETTE.wood);
+  canvas.set(x + doorWidth - 1, y + 1, PALETTE.wood);
+
+  // Pentures et heurtoir
+  canvas.hLine(x, y + 4, doorWidth, PALETTE.steelDark);
+  canvas.hLine(x, y + 9, doorWidth, PALETTE.steelDark);
+  canvas.set(x + doorWidth - 3, y + 6, PALETTE.steelLight);
 }
 
 function drawChimney(canvas: PixelCanvas, x: number, y: number): void {
-  canvas.rect(x, y - 10, 5, 12, PALETTE.stoneDark);
-  canvas.rect(x, y - 10, 5, 2, PALETTE.stoneLight);
-  // Fumée : trois bouffées qui montent en s'écartant.
-  canvas.rect(x + 1, y - 14, 3, 2, PALETTE.cloth);
-  canvas.rect(x + 2, y - 17, 3, 2, PALETTE.clothDark);
-  canvas.rect(x + 1, y - 20, 2, 2, PALETTE.cloth);
+  const chimneyHeight = 14;
+  canvas.rect(x, y - chimneyHeight, 6, chimneyHeight, PALETTE.stoneDark);
+  canvas.rect(x, y - chimneyHeight, 6, 2, PALETTE.stoneLight);
+  canvas.vLine(x + 5, y - chimneyHeight + 2, chimneyHeight - 2, PALETTE.stoneShadow);
+  // Assises de brique
+  canvas.hLine(x, y - chimneyHeight + 5, 6, PALETTE.stoneShadow);
+  canvas.hLine(x, y - chimneyHeight + 9, 6, PALETTE.stoneShadow);
+  // Fumée, en bouffées qui montent en s'écartant.
+  canvas.rect(x + 1, y - chimneyHeight - 4, 4, 3, PALETTE.cloth);
+  canvas.rect(x + 3, y - chimneyHeight - 8, 4, 3, PALETTE.clothDark);
+  canvas.rect(x + 2, y - chimneyHeight - 12, 3, 3, PALETTE.cloth);
 }
 
 function drawRoofBanner(canvas: PixelCanvas, x: number, y: number, main: number, light: number): void {
-  canvas.vLine(x, y - 14, 16, PALETTE.wood);
-  canvas.rect(x + 1, y - 14, 8, 6, main);
-  canvas.rect(x + 1, y - 14, 8, 1, light);
-  canvas.rect(x + 4, y - 12, 3, 3, light);
+  canvas.vLine(x, y - 16, 18, PALETTE.wood);
+  canvas.set(x, y - 17, PALETTE.gold);
+  // Oriflamme à queue d'aronde, plus vivante qu'un simple rectangle.
+  canvas.rect(x + 1, y - 16, 9, 7, main);
+  canvas.rect(x + 1, y - 16, 9, 2, light);
+  canvas.set(x + 9, y - 12, 0x000000);
+  canvas.set(x + 8, y - 11, 0x000000);
+  canvas.rect(x + 4, y - 13, 3, 3, light);
 }
 
 /**

@@ -23,12 +23,12 @@
 
 import { UNITS } from '../data/units.ts';
 import { PixelCanvas, type Sprite } from './canvas.ts';
-import { kingdomShades, PALETTE } from './palette.ts';
+import { kingdomShades, PALETTE, shade } from './palette.ts';
 
 /** Gabarit des unités à pied. */
 const FOOT = { width: 20, height: 26, anchorX: 10, anchorY: 23 };
-/** Gabarit des unités montées, plus large et plus haute. */
-const MOUNTED = { width: 26, height: 30, anchorX: 13, anchorY: 27 };
+/** Gabarit des unités montées : il faut la longueur d'un cheval de profil. */
+const MOUNTED = { width: 34, height: 36, anchorX: 17, anchorY: 33 };
 
 export function drawUnit(defId: string, kingdomColor: number): Sprite {
   const def = UNITS[defId];
@@ -49,21 +49,31 @@ export function drawUnit(defId: string, kingdomColor: number): Sprite {
 
   // Corps du personnage : `torsoTop` est le haut du buste, tout le reste s'y
   // accroche pour que monté et à pied partagent le même dessin.
-  const torsoTop = mounted ? 8 : 12;
+  const torsoTop = mounted ? 6 : 12;
   const centerX = gabarit.anchorX;
 
-  if (mounted) drawHorse(canvas, centerX, groundY);
-  else drawLegs(canvas, centerX, groundY, heavy);
+  if (mounted) {
+    drawHorse(canvas, centerX, groundY);
+    drawRiderLegs(canvas, centerX, groundY, heavy);
+  } else {
+    drawLegs(canvas, centerX, groundY, heavy);
+  }
+
+  // Cape, uniquement pour la cavalerie : elle tombe derrière le buste et
+  // prolonge la ligne du cavalier jusqu'à la croupe. C'est ce qui l'assied
+  // visuellement sur sa monture au lieu de le poser dessus.
+  if (mounted) drawCloak(canvas, centerX, torsoTop, team.main, team.dark);
 
   drawTorso(canvas, centerX, torsoTop, team.main, team.dark, heavy);
-  drawHead(canvas, centerX, torsoTop - 6, heavy, worker);
+  drawHead(canvas, centerX, torsoTop - 6, heavy || mounted, worker);
 
+  const armX = centerX + (mounted ? 7 : 6);
   if (ranged) drawBow(canvas, centerX + 5, torsoTop - 1);
-  else if (polearm) drawSpear(canvas, centerX + 6, torsoTop - 12);
+  else if (polearm) drawSpear(canvas, armX, torsoTop - 12);
   else if (worker) drawTool(canvas, centerX + 5, torsoTop - 3);
-  else drawSword(canvas, centerX + 6, torsoTop - 2, heavy);
+  else drawSword(canvas, armX, torsoTop - 2, heavy);
 
-  if (leader) drawBanner(canvas, centerX - 7, torsoTop - 14, team.main, team.light);
+  if (leader) drawBanner(canvas, centerX - 8, torsoTop - 15, team.main, team.light);
 
   // Bouclier aux couleurs du royaume : ce qui rend un fantassin lisible de loin.
   if (!worker && !ranged && !polearm) {
@@ -83,28 +93,97 @@ function drawLegs(canvas: PixelCanvas, cx: number, groundY: number, heavy: boole
   canvas.rect(cx + 1, groundY - 1, 3, 1, PALETTE.woodDark);
 }
 
+/**
+ * Cheval de profil, tourné vers la droite.
+ *
+ * Dessiné pour l'anatomie et non pour la géométrie : croupe, flanc, poitrail,
+ * encolure qui monte, tête inclinée vers l'avant, quatre membres articulés.
+ * Les deux membres du côté opposé sont plus sombres et légèrement décalés —
+ * c'est ce décalage, plus que tout le reste, qui donne la profondeur et
+ * empêche la monture de se lire comme un bloc.
+ */
 function drawHorse(canvas: PixelCanvas, cx: number, groundY: number): void {
-  const body = PALETTE.horse;
+  const coat = PALETTE.horse;
   const dark = PALETTE.horseDark;
+  const deep = shade(PALETTE.horseDark, 0.75);
 
-  // Quatre jambes, deux plus sombres pour suggérer le côté opposé.
-  canvas.rect(cx - 6, groundY - 6, 2, 6, dark);
-  canvas.rect(cx + 4, groundY - 6, 2, 6, dark);
-  canvas.rect(cx - 4, groundY - 6, 2, 6, body);
-  canvas.rect(cx + 2, groundY - 6, 2, 6, body);
+  // ── Membres du côté opposé, posés en premier ────────────────────────────
+  // Antérieur droit
+  canvas.rect(cx + 3, groundY - 11, 3, 7, deep);
+  canvas.rect(cx + 3, groundY - 5, 3, 5, deep);
+  // Postérieur droit : cuisse large, puis canon fin
+  canvas.rect(cx - 9, groundY - 12, 4, 6, deep);
+  canvas.rect(cx - 8, groundY - 7, 3, 7, deep);
 
-  // Corps
-  canvas.rect(cx - 7, groundY - 12, 14, 6, body);
-  canvas.rect(cx - 7, groundY - 7, 14, 1, dark);
+  // ── Corps ───────────────────────────────────────────────────────────────
+  // Flanc, plus haut à la croupe qu'au passage de sangle
+  canvas.rect(cx - 10, groundY - 20, 18, 9, coat);
+  canvas.rect(cx - 11, groundY - 19, 3, 7, coat);
+  canvas.rect(cx + 6, groundY - 21, 4, 9, coat);
+  // Ligne du ventre, dans l'ombre
+  canvas.rect(cx - 10, groundY - 12, 18, 1, dark);
+  // Croupe arrondie
+  canvas.rect(cx - 12, groundY - 18, 2, 5, coat);
 
-  // Encolure et tête, tournées vers la droite
-  canvas.rect(cx + 5, groundY - 16, 3, 5, body);
-  canvas.rect(cx + 7, groundY - 16, 3, 3, body);
-  canvas.set(cx + 9, groundY - 15, PALETTE.outline);
+  // ── Encolure et tête ────────────────────────────────────────────────────
+  canvas.rect(cx + 8, groundY - 26, 5, 8, coat);
+  canvas.rect(cx + 10, groundY - 28, 4, 5, coat);
+  // Chanfrein et bout du nez, inclinés vers l'avant
+  canvas.rect(cx + 12, groundY - 27, 5, 4, coat);
+  canvas.rect(cx + 15, groundY - 25, 3, 3, dark);
+  canvas.set(cx + 17, groundY - 24, PALETTE.outline);
+  // Œil et oreilles
+  canvas.set(cx + 13, groundY - 26, PALETTE.outline);
+  canvas.rect(cx + 10, groundY - 30, 2, 2, coat);
+  canvas.rect(cx + 13, groundY - 30, 2, 2, dark);
 
-  // Crinière et queue
-  canvas.rect(cx + 3, groundY - 16, 3, 2, dark);
-  canvas.rect(cx - 9, groundY - 12, 2, 5, dark);
+  // Crinière : de la nuque au garrot
+  canvas.rect(cx + 7, groundY - 29, 5, 3, dark);
+  canvas.rect(cx + 5, groundY - 26, 4, 5, dark);
+
+  // ── Membres du côté visible ─────────────────────────────────────────────
+  // Antérieur gauche : épaule, avant-bras, canon
+  canvas.rect(cx + 5, groundY - 13, 4, 6, coat);
+  canvas.rect(cx + 5, groundY - 8, 3, 8, coat);
+  canvas.rect(cx + 5, groundY - 1, 4, 1, PALETTE.outline);
+  // Postérieur gauche : la cuisse déborde vers l'arrière, le jarret est marqué
+  canvas.rect(cx - 11, groundY - 14, 5, 7, coat);
+  canvas.rect(cx - 10, groundY - 8, 3, 8, coat);
+  canvas.rect(cx - 11, groundY - 1, 4, 1, PALETTE.outline);
+
+  // ── Queue ───────────────────────────────────────────────────────────────
+  canvas.rect(cx - 14, groundY - 19, 3, 6, dark);
+  canvas.rect(cx - 15, groundY - 14, 3, 6, dark);
+  canvas.rect(cx - 14, groundY - 9, 2, 3, deep);
+
+  // ── Harnachement ────────────────────────────────────────────────────────
+  // Selle et sangle
+  canvas.rect(cx - 4, groundY - 22, 9, 3, PALETTE.woodDark);
+  canvas.rect(cx - 4, groundY - 22, 9, 1, PALETTE.wood);
+  canvas.rect(cx - 1, groundY - 19, 2, 8, PALETTE.woodDark);
+  // Têtière et rênes
+  canvas.line(cx + 14, groundY - 26, cx + 5, groundY - 23, PALETTE.woodDark);
+  canvas.set(cx + 12, groundY - 25, PALETTE.steel);
+}
+
+/** Cape du cavalier, drapée de l'épaule jusqu'à la croupe. */
+function drawCloak(canvas: PixelCanvas, cx: number, top: number, main: number, dark: number): void {
+  canvas.rect(cx - 8, top + 1, 6, 12, dark);
+  canvas.rect(cx - 7, top + 1, 4, 10, main);
+  // Ourlet irrégulier : une cape à bord droit se lit comme une planche.
+  canvas.rect(cx - 9, top + 9, 3, 3, dark);
+  canvas.rect(cx - 6, top + 12, 3, 2, dark);
+}
+
+/** Jambe du cavalier, pliée sur le flanc, avec la botte à l'étrier. */
+function drawRiderLegs(canvas: PixelCanvas, cx: number, groundY: number, heavy: boolean): void {
+  const color = heavy ? PALETTE.steelDark : PALETTE.woodDark;
+  // Cuisse le long de la selle, puis mollet qui descend le long du flanc.
+  canvas.rect(cx, groundY - 22, 5, 4, color);
+  canvas.rect(cx + 3, groundY - 19, 3, 6, color);
+  canvas.rect(cx + 2, groundY - 14, 4, 2, PALETTE.woodDark);
+  // Étrier
+  canvas.rect(cx + 3, groundY - 12, 3, 1, PALETTE.steel);
 }
 
 function drawTorso(

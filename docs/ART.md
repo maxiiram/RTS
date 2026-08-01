@@ -4,7 +4,8 @@ Charte graphique du jeu, et mode d'emploi de la chaîne de production des
 sprites. C'est la traduction du GDD §10 en règles applicables.
 
 ```bash
-npm run sprites     # régénère docs/sprites.png, la planche de référence
+npm run sprites                    # régénère docs/sprites.png
+npm run sprites planche.png 4      # la même, agrandie 4 fois pour le détail
 ```
 
 ![Planche de référence](sprites.png)
@@ -13,18 +14,27 @@ npm run sprites     # régénère docs/sprites.png, la planche de référence
 
 ## 1. Le parti pris
 
-**Pixel art 8-bit minimaliste, tons chauds et pastel, ambiance estivale.**
-L'inverse de l'austérité grise habituelle du médiéval : on doit avoir envie
-d'y passer une après-midi, pas d'y survivre.
+**Pixel art aux tons chauds et pastel, ambiance estivale, avec une exigence de
+vraisemblance.** L'inverse de l'austérité grise habituelle du médiéval : on doit
+avoir envie d'y passer une après-midi, pas d'y survivre.
+
+> **Écart assumé avec le GDD §10.** Le document parlait de « 8-bit
+> minimaliste ». Après un premier essai, la direction a été infléchie vers plus
+> de matière : maçonnerie appareillée, colombages, rangs de tuiles, anatomie
+> réelle des chevaux. Le nombre de pixels n'a pas beaucoup bougé — c'est la
+> densité d'information dans chacun qui a augmenté. Le GDD mérite d'être mis à
+> jour sur ce point.
 
 Trois conséquences pratiques :
 
-- **Peu de pixels par entité.** Une unité tient dans 20 × 26. C'est ce qui rend
-  la production tenable en solo, et ce qui force à ne garder que l'essentiel.
+- **Peu de pixels par entité.** Un fantassin tient dans 20 × 26, un cavalier
+  dans 34 × 36. C'est ce qui rend la production tenable en solo.
 - **Aucun dégradé, aucun anticrénelage.** Chaque pixel est posé franchement. À
-  cette taille, une transition douce se lit comme une tache sale.
+  cette taille, une transition douce se lit comme une tache sale. Le volume
+  vient des valeurs et des arêtes, jamais du flou.
 - **La lisibilité prime sur le détail.** Un joueur doit reconnaître une unité
   sans lire son nom, et distinguer un allié d'un ennemi au premier coup d'œil.
+  Le détail vient **après** ce contrat, jamais contre lui.
 
 ---
 
@@ -85,7 +95,7 @@ leurs caractéristiques de jeu. Un joueur doit lire une armée **sans infobulle*
 
 | Signe | Sens |
 |---|---|
-| Monture | cavalerie |
+| Cheval de profil, cape, casque | cavalerie |
 | Casque fermé, plastron d'acier | armure lourde |
 | Arc tenu devant | unité à distance |
 | Hampe dépassant la tête | arme d'hast, anti-cavalerie |
@@ -95,6 +105,21 @@ leurs caractéristiques de jeu. Un joueur doit lire une armée **sans infobulle*
 
 La tunique porte toujours la couleur du royaume.
 
+### Le cheval
+
+Dessiné pour l'anatomie et non pour la géométrie : croupe, flanc, poitrail,
+encolure qui monte, tête inclinée vers l'avant, quatre membres articulés,
+crinière et queue. Le harnachement — selle, sangle, rênes — achève de le
+distinguer d'un animal sauvage.
+
+Le détail qui fait tout : **les deux membres du côté opposé sont plus sombres et
+légèrement décalés**. C'est ce décalage, plus que tout le reste, qui donne la
+profondeur et empêche la monture de se lire comme un bloc.
+
+Le cavalier reçoit une cape qui tombe derrière son buste jusqu'à la croupe.
+Elle prolonge sa ligne et l'assied visuellement sur sa monture, au lieu de le
+poser dessus.
+
 ---
 
 ## 5. L'architecture
@@ -103,6 +128,30 @@ Tous les bâtiments partagent le même squelette — socle isométrique, murs, t
 — et ne se distinguent que par leur matériau, leur hauteur et deux ou trois
 détails. C'est ce qui donne un village qui se tient plutôt qu'une collection
 d'objets sans rapport.
+
+### Ce qui fait qu'un bâtiment ressemble à un bâtiment
+
+Cinq éléments, tous nécessaires. Retirez-en un et le volume redevient une boîte
+colorée :
+
+1. **Un soubassement de pierre** sur toutes les façades, quel que soit le
+   matériau du mur. C'est ce qui assied la construction sur le sol.
+2. **Un parement qui a une trame** : assises de pierre aux joints décalés d'une
+   rangée à l'autre, ou colombage avec sablières, poteaux et remplissage clair.
+   Un aplat de couleur ne sera jamais un mur.
+3. **Des ouvertures.** Fenêtres à encadrement et appui, porte à chambranle,
+   vantail à planches et pentures de fer. Ce sont elles qui donnent l'échelle du
+   bâtiment.
+4. **Une toiture avec ses rangs**, tracés d'une arête à l'autre en suivant la
+   pente réelle vers le faîte — plus serrés pour la tuile, plus larges pour le
+   chaume — avec ses arêtiers et son faîtage.
+5. **Une avancée de toit** et sa ligne d'ombre sur le haut du mur. Sans débord,
+   un bâtiment paraît coupé au couteau.
+
+**Seules les deux façades tournées vers le bas de l'écran sont dessinées.** Les
+deux faces arrière n'ont aucune raison de l'être — elles l'étaient, et c'est
+pour ça que les premiers bâtiments semblaient n'avoir aucun mur : on voyait leur
+dos, intégralement masqué par le toit.
 
 Le tableau `STYLES` dans `src/art/buildings.ts` est court à dessein : ce sont
 les seules décisions esthétiques à prendre par bâtiment, tout le reste découle

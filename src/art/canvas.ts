@@ -111,6 +111,34 @@ export class PixelCanvas {
     }
   }
 
+  /** Segment de droite, tracé au plus court (Bresenham). */
+  line(x0: number, y0: number, x1: number, y1: number, color: number): void {
+    let x = Math.round(x0);
+    let y = Math.round(y0);
+    const endX = Math.round(x1);
+    const endY = Math.round(y1);
+
+    const dx = Math.abs(endX - x);
+    const dy = Math.abs(endY - y);
+    const stepX = x < endX ? 1 : -1;
+    const stepY = y < endY ? 1 : -1;
+    let error = dx - dy;
+
+    for (let guard = 0; guard < 4096; guard++) {
+      this.set(x, y, color);
+      if (x === endX && y === endY) break;
+      const doubled = error * 2;
+      if (doubled > -dy) {
+        error -= dy;
+        x += stepX;
+      }
+      if (doubled < dx) {
+        error += dx;
+        y += stepY;
+      }
+    }
+  }
+
   /**
    * Triangle plein, balayé ligne par ligne.
    * Sert aux pans de toiture, qui sont la seule surface oblique du jeu.

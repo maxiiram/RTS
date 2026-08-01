@@ -1,7 +1,10 @@
 /**
  * Planche de référence de l'art du jeu.
  *
- *   npm run sprites [fichier.png]
+ *   npm run sprites [fichier.png] [agrandissement]
+ *
+ * L'agrandissement sert au travail graphique : à 1 pixel pour 1 les sprites
+ * sont trop petits pour juger un détail, à 4 ou 5 on voit chaque pixel.
  *
  * Fabrique une image unique montrant chaque sprite du jeu, section par
  * section. C'est le document de contrôle de la direction artistique : tout se
@@ -19,14 +22,15 @@ import { catalogue } from '../src/art/index.ts';
 import { PALETTE } from '../src/art/palette.ts';
 
 const output = process.argv[2] ?? 'docs/sprites.png';
+const SCALE = Math.max(1, Math.min(8, Number(process.argv[3]) || 1));
 
 /** Taille de cellule par section : les bâtiments ont besoin de place. */
 const CELL_BY_SECTION = {
-  'Bâtiments': { cell: 148, columns: 5 },
-  Chantiers: { cell: 148, columns: 5 },
-  Murailles: { cell: 52, columns: 8 },
+  'Bâtiments': { cell: 148 * SCALE, columns: 5 },
+  Chantiers: { cell: 148 * SCALE, columns: 5 },
+  Murailles: { cell: 52 * SCALE, columns: 8 },
 };
-const DEFAULT_CELL = { cell: 68, columns: 10 };
+const DEFAULT_CELL = { cell: 68 * SCALE, columns: 10 };
 const HEADER = 16;
 const MARGIN = 12;
 
@@ -86,7 +90,7 @@ for (const section of sections) {
     // Damier de fond : rend visibles les pixels transparents du sprite.
     for (let dy = 0; dy < CELL - 4; dy++) {
       for (let dx = 0; dx < CELL - 4; dx++) {
-        const dark = (Math.floor(dx / 8) + Math.floor(dy / 8)) % 2 === 0;
+        const dark = (Math.floor(dx / (8 * SCALE)) + Math.floor(dy / (8 * SCALE))) % 2 === 0;
         set(cellX + dx, cellY + dy, dark ? 0x3a332b : 0x433b31);
       }
     }
@@ -94,8 +98,8 @@ for (const section of sections) {
     const sprite = entry.sprite;
     // Le sprite est centré sur son point d'ancrage, posé au tiers bas de la
     // cellule : c'est ainsi qu'on le verra en jeu, debout sur le sol.
-    const originX = cellX + Math.floor((CELL - 4) / 2) - sprite.anchorX;
-    const originY = cellY + Math.floor(((CELL - 4) * 2) / 3) - sprite.anchorY;
+    const originX = cellX + Math.floor((CELL - 4) / 2) - sprite.anchorX * SCALE;
+    const originY = cellY + Math.floor(((CELL - 4) * 2) / 3) - sprite.anchorY * SCALE;
 
     for (let y = 0; y < sprite.height; y++) {
       for (let x = 0; x < sprite.width; x++) {
@@ -104,7 +108,12 @@ for (const section of sections) {
         if (alpha === 0) continue;
         const color =
           ((sprite.data[i] ?? 0) << 16) | ((sprite.data[i + 1] ?? 0) << 8) | (sprite.data[i + 2] ?? 0);
-        set(originX + x, originY + y, color, alpha);
+
+        for (let sy = 0; sy < SCALE; sy++) {
+          for (let sx = 0; sx < SCALE; sx++) {
+            set(originX + x * SCALE + sx, originY + y * SCALE + sy, color, alpha);
+          }
+        }
       }
     }
   });
