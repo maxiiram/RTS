@@ -93,7 +93,7 @@ const NEIGHBOURS: ReadonlyArray<readonly [number, number, number]> = [
  *
  * Sur une carte de 120 × 120, allouer trois tableaux de 14 400 cases à chaque
  * recherche de chemin — et il y en a plusieurs par seconde et par unité —
- * saturerait le ramasse-miettes à lui seul. On les garde et on les réinitialise.
+ * saturerait le ramasse-miettes à lui seul.
  */
 const scratch = {
   size: 0,

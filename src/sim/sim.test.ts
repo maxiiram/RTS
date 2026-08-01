@@ -13,7 +13,16 @@ import { SIM_TICK_SECONDS, STARTING_RESOURCES } from '../data/constants.ts';
 import { AGES } from '../data/ages.ts';
 import { UNITS } from '../data/units.ts';
 import { createAi, stepAi } from './ai.ts';
-import { ageProgress, orderGather, orderGroup, orderMove, sandboxSpawn, train } from './commands.ts';
+import {
+  ageProgress,
+  orderGather,
+  orderGroup,
+  orderMove,
+  placeBuildingRun,
+  sandboxSpawn,
+  tilesAlongLine,
+  train,
+} from './commands.ts';
 import { findPath, rebuildBlocked } from './grid.ts';
 import { stepWorld } from './sim.ts';
 import type { Entity, World } from './types.ts';
@@ -71,8 +80,8 @@ describe('génération du monde', () => {
 
 describe('zones de ressources', () => {
   it('les gisements forment des zones d\'un seul tenant, pas un semis', () => {
-    // Le GDD veut des forêts et des filons à la manière d'Age of Empires :
-    // on exploite la lisière d'une masse, on ne court pas d'un arbre isolé au
+    // Le GDD veut des forêts et des filons à la manière d'Age of Empires : on
+    // exploite la lisière d'une masse, on ne court pas d'un arbre isolé au
     // suivant. On mesure donc le voisinage de chaque gisement.
     const world = createWorld();
     const nodes = [...world.entities.values()].filter((e) => e.kind === 'resource');
@@ -83,14 +92,14 @@ describe('zones de ressources', () => {
     for (const node of nodes) {
       const x = Math.floor(node.x);
       const y = Math.floor(node.y);
-      const neighbours = [
+      const sameKind = [
         byTile.get(`${x + 1},${y}`),
         byTile.get(`${x - 1},${y}`),
         byTile.get(`${x},${y + 1}`),
         byTile.get(`${x},${y - 1}`),
       ].filter((n) => n?.resource === node.resource);
 
-      if (neighbours.length === 0) isolated++;
+      if (sameKind.length === 0) isolated++;
     }
 
     const ratio = isolated / nodes.length;
@@ -114,7 +123,7 @@ describe('zones de ressources', () => {
       return counts;
     };
 
-    // Miroir strict : aucun camp ne doit démarrer avantagé.
+    // Miroir strict : aucun camp ne démarre avantagé.
     deepStrictEqual(nearBase(0), nearBase(1));
   });
 });
@@ -125,12 +134,11 @@ describe('brouillard de guerre', () => {
     const tc = [...world.entities.values()].find(
       (e) => e.owner === 0 && e.defId === 'centre_ville',
     ) as Entity;
-
-    strictEqual(visibilityAt(world, 0, tc.x, tc.y), 2);
-
     const enemyTc = [...world.entities.values()].find(
       (e) => e.owner === 1 && e.defId === 'centre_ville',
     ) as Entity;
+
+    strictEqual(visibilityAt(world, 0, tc.x, tc.y), 2);
     strictEqual(visibilityAt(world, 0, enemyTc.x, enemyTc.y), 0);
   });
 
@@ -151,13 +159,11 @@ describe('brouillard de guerre', () => {
 
     orderMove(scout, target.x, target.y);
     run(world, 60);
-
     strictEqual(visibilityAt(world, 0, target.x, target.y), 2);
 
     // L'éclaireur repart : le terrain reste connu, mais n'est plus observé.
     orderMove(scout, scout.x - 30, scout.y);
     run(world, 60);
-
     strictEqual(
       visibilityAt(world, 0, target.x, target.y),
       1,
@@ -167,12 +173,10 @@ describe('brouillard de guerre', () => {
 
   it('on se souvient des bâtiments découverts, jamais des unités', () => {
     // Règle d'Age of Empires : le relief et les constructions sont mémorisés,
-    // ce qui bouge ne l'est pas.
+    // ce qui bouge ne l'est pas. Deux paysans face à face, pour isoler la
+    // question de la visibilité de celle des dégâts.
     const world = createWorld();
     const scout = unitsOf(world, 0)[0] as Entity;
-
-    // Deux paysans face à face : ni l'un ni l'autre n'engage le combat, ce qui
-    // isole la question de la visibilité de celle des dégâts.
     const enemyBuilding = spawnBuilding(world, 'maison', 1, 30, 30);
     const enemyUnit = spawnUnit(world, 'paysan', 1, 33.5, 31.5);
 
@@ -187,6 +191,67 @@ describe('brouillard de guerre', () => {
 
     ok(isEntityVisible(world, 0, enemyBuilding), 'le bâtiment découvert devrait rester affiché');
     strictEqual(isEntityVisible(world, 0, enemyUnit), false, "l'unité ne devrait plus être visible");
+  });
+});
+
+describe('murailles posées au glisser', () => {
+  it('trace une ligne continue de tuiles adjacentes', () => {
+    const tiles = tilesAlongLine({ x: 10, y: 10 }, { x: 18, y: 14 });
+
+    strictEqual(tiles[0]?.x, 10);
+    strictEqual(tiles[tiles.length - 1]?.x, 18);
+    strictEqual(tiles[tiles.length - 1]?.y, 14);
+
+    // Aucun trou : chaque tuile touche la précédente.
+    for (let i = 1; i < tiles.length; i++) {
+      const previous = tiles[i - 1] as Entity;
+      const current = tiles[i] as Entity;
+      const step = Math.max(Math.abs(current.x - previous.x), Math.abs(current.y - previous.y));
+      strictEqual(step, 1, `saut de ${step} tuiles dans le tracé`);
+    }
+  });
+
+  it('pose une file de segments et n\'en facture aucun de trop', () => {
+    const world = createWorld();
+    world.players[0].age = 2;
+    world.players[0].resources.stone = 1000;
+    const before = world.players[0].resources.stone;
+
+    const result = placeBuildingRun(world, 0, 'muraille', { x: 40, y: 40 }, { x: 49, y: 40 }, []);
+
+    ok(result.placed >= 8, `seulement ${result.placed} segments posés`);
+    const spent = before - world.players[0].resources.stone;
+    strictEqual(spent, result.placed * 5, 'la pierre dépensée ne correspond pas aux segments posés');
+  });
+
+  it('s\'arrête net quand la pierre manque', () => {
+    const world = createWorld();
+    world.players[0].age = 2;
+    // De quoi payer exactement trois segments.
+    world.players[0].resources.stone = 15;
+
+    const result = placeBuildingRun(world, 0, 'muraille', { x: 40, y: 40 }, { x: 60, y: 40 }, []);
+
+    strictEqual(result.placed, 3);
+    strictEqual(world.players[0].resources.stone, 0);
+  });
+
+  it('un bâtisseur enchaîne sur le segment suivant sans nouvel ordre', () => {
+    // Sans cet enchaînement, poser une muraille d'un glisser obligerait à
+    // redonner l'ordre à chaque segment.
+    const world = createWorld();
+    world.players[0].age = 2;
+    world.players[0].resources.stone = 1000;
+
+    const builder = spawnUnit(world, 'paysan', 0, 40, 42);
+    placeBuildingRun(world, 0, 'muraille', { x: 40, y: 40 }, { x: 44, y: 40 }, [builder]);
+
+    run(world, 120);
+
+    const finished = [...world.entities.values()].filter(
+      (e) => e.defId === 'muraille' && e.buildProgress >= 1,
+    );
+    ok(finished.length >= 3, `un seul bâtisseur n'a terminé que ${finished.length} segments`);
   });
 });
 

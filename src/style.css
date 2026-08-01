@@ -318,7 +318,8 @@ button.rubis {
 #log {
   position: absolute;
   left: 10px;
-  bottom: 120px;
+  /* Au-dessus du panneau de sélection, qu'il chevauchait. */
+  bottom: 165px;
   width: 300px;
   font-size: 12px;
   line-height: 1.5;

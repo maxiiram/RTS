@@ -6,7 +6,7 @@ choix, il ne fait pas autorité sur les valeurs** — le code est la source de
 vérité, et il est vérifié par `npm test`.
 
 ```bash
-npm test        # 70 vérifications d'intégrité et d'équilibrage
+npm test        # 74 vérifications d'intégrité et d'équilibrage
 npm run balance # rapport complet : duels, rendements, rythme de partie
 npm run typecheck
 ```
@@ -233,15 +233,15 @@ réflexe systématique.
 | Âge 2 — Féodal | 600 N | 100 s | ~6,7 min (8 paysans) |
 | Âge 3 — Châteaux | 1000 N 600 O | 160 s | ~6,0 min de plus (24 collecteurs) |
 
-Ces coûts ont été relevés après un premier essai jugé trop expéditif. Avec la
-carte de 120 × 120, les trajets s'allongent aussi : l'âge 2 tombe autour de
-11-13 minutes en conditions réelles et l'âge 3 vers 25 minutes.
+Ces coûts ont été relevés après un essai jugé trop expéditif. Avec la carte de
+120 × 120, les trajets s'allongent aussi : l'âge 2 tombe autour de 11-13 minutes
+en conditions réelles et l'âge 3 vers 25 minutes.
 
 Ce modèle est **optimiste** : il suppose un revenu constant et aucune dépense
-concurrente. En partie réelle — maisons, bâtiments militaires, premières unités,
-trajets allongés par la taille de la carte — compter 1,5 à 2 fois plus. Le
-premier affrontement sérieux arrive donc bien après une vraie phase économique,
-comme le veut le GDD §4, et l'IA ne lance son premier assaut qu'à 7 minutes.
+concurrente. En partie réelle — maisons, bâtiments militaires, premières unités
+— compter 1,5 à 2 fois plus. Soit l'âge 2 vers 8-10 minutes et l'âge 3 vers
+20 minutes, ce qui place le premier affrontement sérieux bien après une vraie
+phase économique, comme le veut le GDD §4.
 
 Autre garde-fou du même ordre : **dix soldats mettent 67 secondes à détruire un
 centre-ville** (2000 PV, armure 3). C'est délibérément long. Le défenseur a le

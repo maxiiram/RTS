@@ -11,9 +11,9 @@ import { Application, BufferImageSource, Container, Graphics, Matrix, Sprite, Te
 import { BUILDINGS } from '../data/buildings.ts';
 import { TILE_HEIGHT, TILE_WIDTH } from '../data/constants.ts';
 import { UNITS } from '../data/units.ts';
-import { screenToTile, tileToScreen } from '../sim/grid.ts';
+import { tileToScreen } from '../sim/grid.ts';
 import type { Entity, PlayerId, World } from '../sim/types.ts';
-import { currentAction, isEntityVisible } from '../sim/world.ts';
+import { currentAction, isEntityVisible, visibilityAt } from '../sim/world.ts';
 import { ACTION_COLORS, PALETTE } from './palette.ts';
 import { buildingContext, resourceContext, unitContext } from './shapes.ts';
 
@@ -67,9 +67,8 @@ export class Renderer {
    * Tous deux sont une **grille de pixels projetée**, pas des milliers de
    * losanges. La projection isométrique étant une transformation linéaire, une
    * texture d'un pixel par tuile, dessinée avec la bonne matrice, produit
-   * exactement le même damier — mais en un seul objet à l'écran au lieu de
-   * 14 400. C'est ce qui a fait passer le jeu de 8 à plus de 50 images par
-   * seconde sur la grande carte.
+   * exactement le même damier — mais en un seul objet à afficher au lieu de
+   * 14 400 sur une carte de 120 × 120.
    */
   buildLayers(world: World): void {
     this.terrain?.sprite.destroy();
@@ -87,15 +86,23 @@ export class Renderer {
     }
     this.terrain.source.update();
 
-    // Ordre des calques : sol, entités, silhouettes des unités masquées,
-    // aperçus de l'interface, puis le brouillard qui recouvre tout.
+    // Le brouillard est peint sur le **sol**, sous les entités.
+    //
+    // Au-dessus, il recouvrait tout ce qui dépasse du sol : le haut des
+    // bâtiments, et surtout les barres de vie et de construction, tracées
+    // plusieurs dizaines de pixels plus haut que la tuile à laquelle elles
+    // appartiennent. On ne voyait plus avancer ses propres chantiers.
+    //
+    // Les entités dont on ne fait que se souvenir sont assombries à la place,
+    // ce qui donne le rendu d'Age of Empires : un bâtiment découvert reste
+    // visible, en plus terne.
     this.world.removeChildren();
     this.world.addChild(
       this.terrain.sprite,
+      this.fog.sprite,
       this.entityLayer,
       this.silhouetteLayer,
       this.overlayLayer,
-      this.fog.sprite,
     );
 
     this.fogVersion = -1;
@@ -157,7 +164,12 @@ export class Renderer {
       }
 
       seen.add(entity.id);
-      this.syncEntity(world, entity, selected.has(entity.id));
+      const view = this.syncEntity(world, entity, selected.has(entity.id));
+
+      // Souvenir : découvert, mais plus observé. On l'assombrit au lieu de le
+      // recouvrir, pour ne jamais masquer une barre de vie ou de chantier.
+      view.container.tint = visibilityAt(world, player, entity.x, entity.y) < 2 ? 0x6a6a72 : 0xffffff;
+
       drawn.push(entity);
     }
 
@@ -173,12 +185,7 @@ export class Renderer {
   }
 
   /** Rectangle du monde couvert par l'écran, en pixels, avec une marge. */
-  private viewportBounds(margin: number): {
-    minX: number;
-    maxX: number;
-    minY: number;
-    maxY: number;
-  } {
+  private viewportBounds(margin: number): { minX: number; maxX: number; minY: number; maxY: number } {
     const topLeft = this.screenToWorld(0, 0);
     const bottomRight = this.screenToWorld(this.app.renderer.width, this.app.renderer.height);
 
@@ -195,8 +202,8 @@ export class Renderer {
    *
    * En vue isométrique, un bâtiment un peu haut avale complètement les unités
    * situées derrière lui : on croit les avoir perdues. Une pastille aux
-   * couleurs du royaume, tracée par-dessus, suffit à les retrouver sans pour
-   * autant rendre les bâtiments transparents.
+   * couleurs du royaume, tracée par-dessus, suffit à les retrouver sans rendre
+   * les bâtiments transparents.
    */
   private drawSilhouettes(world: World, entities: Entity[]): void {
     this.silhouetteLayer.clear();
@@ -238,8 +245,7 @@ export class Renderer {
    * Brouillard de guerre : une écriture de pixels, pas un dessin.
    *
    * On ne repeint que quand la vision a changé — deux fois par seconde — et le
-   * coût à l'affichage est celui d'une seule image, quelle que soit la taille
-   * de la carte.
+   * coût à l'affichage est celui d'une seule image, quelle que soit la carte.
    */
   private drawFog(world: World, player: PlayerId): void {
     if (!this.fog || world.visibilityVersion === this.fogVersion) return;
@@ -251,8 +257,7 @@ export class Renderer {
       for (let x = 0; x < world.width; x++) {
         const state = map[y * world.width + x] ?? 0;
         // Jamais exploré : noir opaque. Exploré mais hors de vue : voilé.
-        const alpha = state === 2 ? 0 : state === 1 ? 128 : 255;
-        writePixel(this.fog, x, y, 0x000000, alpha);
+        writePixel(this.fog, x, y, 0x000000, state === 2 ? 0 : state === 1 ? 120 : 255);
       }
     }
 
@@ -385,8 +390,8 @@ export class Renderer {
     let bestDepth = -Infinity;
 
     for (const entity of world.entities.values()) {
-      // On ne désigne pas ce qu'on ne voit pas : cliquer dans le brouillard
-      // ne doit pas révéler la présence d'une unité adverse.
+      // On ne désigne pas ce qu'on ne voit pas : cliquer dans le brouillard ne
+      // doit pas révéler la présence d'une unité adverse.
       if (!isEntityVisible(world, player, entity)) continue;
       const anchor = tileToScreen(entity.x, entity.y);
       const box = spriteBox(entity);
@@ -420,16 +425,19 @@ export class Renderer {
     }
 
     const footprint = BUILDINGS[ghost.buildingId]?.footprint ?? { w: 1, h: 1 };
-    const color = ghost.valid ? 0x8cd07a : 0xe06666;
+    const hw = TILE_WIDTH / 2;
+    const hh = TILE_HEIGHT / 2;
 
-    for (let dy = 0; dy < footprint.h; dy++) {
-      for (let dx = 0; dx < footprint.w; dx++) {
-        const p = tileToScreen(ghost.tileX + dx + 0.5, ghost.tileY + dy + 0.5);
-        const hw = TILE_WIDTH / 2;
-        const hh = TILE_HEIGHT / 2;
-        this.overlayLayer
-          .poly([p.x, p.y - hh, p.x + hw, p.y, p.x, p.y + hh, p.x - hw, p.y])
-          .fill({ color, alpha: 0.4 });
+    for (const tile of ghost.tiles) {
+      const color = tile.valid ? 0x8cd07a : 0xe06666;
+
+      for (let dy = 0; dy < footprint.h; dy++) {
+        for (let dx = 0; dx < footprint.w; dx++) {
+          const p = tileToScreen(tile.x + dx + 0.5, tile.y + dy + 0.5);
+          this.overlayLayer
+            .poly([p.x, p.y - hh, p.x + hw, p.y, p.x, p.y + hh, p.x - hw, p.y])
+            .fill({ color, alpha: 0.4 });
+        }
       }
     }
   }
@@ -508,7 +516,12 @@ function spriteBox(entity: Entity): {
 
 export type GhostPreview =
   | { kind: 'selection'; x: number; y: number; width: number; height: number }
-  | { kind: 'building'; buildingId: string; tileX: number; tileY: number; valid: boolean };
+  | {
+      kind: 'building';
+      buildingId: string;
+      /** Une seule tuile en pose simple, toute la file pendant un glisser. */
+      tiles: Array<{ x: number; y: number; valid: boolean }>;
+    };
 
 /** Nom lisible d'une entité, pour l'interface. */
 export function displayName(entity: Entity): string {

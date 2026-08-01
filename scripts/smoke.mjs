@@ -43,7 +43,7 @@ await page.goto(url, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 
 /**
- * Position à l'écran d'une entité choisie par un prédicat, en pixels.
+ * Position à l'écran d'une entité, en pixels.
  *
  * Cliquer à des coordonnées écrites en dur rendait ce test dépendant de la
  * carte : le moindre changement de génération le faisait échouer sans qu'aucun
@@ -54,9 +54,7 @@ const screenPositionOf = (kind) =>
     const { world, renderer } = window.rts;
     const { tileToScreen } = await import('/src/sim/grid.ts');
 
-    const villager = [...world.entities.values()].find(
-      (e) => e.kind === 'unit' && e.owner === 0,
-    );
+    const villager = [...world.entities.values()].find((e) => e.kind === 'unit' && e.owner === 0);
     if (!villager) return null;
 
     let best = null;
@@ -64,6 +62,9 @@ const screenPositionOf = (kind) =>
     for (const e of world.entities.values()) {
       if (wanted === 'wood' && !(e.kind === 'resource' && e.resource === 'wood')) continue;
       if (wanted === 'townCenter' && !(e.owner === 0 && e.defId === 'centre_ville')) continue;
+      if (wanted === 'villager' && !(e.kind === 'unit' && e.owner === 0 && e.defId === 'paysan')) {
+        continue;
+      }
       const distance = Math.hypot(e.x - villager.x, e.y - villager.y);
       if (distance < bestDistance) {
         bestDistance = distance;
@@ -135,6 +136,57 @@ await page.locator('#actions-panel button').first().click();
 await page.locator('.speeds button[data-speed="8"]').click();
 await page.waitForTimeout(4000);
 check('un paysan sort de la file de production', (await state()).saphir > before);
+
+// — Muraille posée au glisser —
+await page.locator('.speeds button[data-speed="0"]').click();
+await page.evaluate(() => {
+  const { world } = window.rts;
+  world.players[0].age = 2;
+  world.players[0].resources.stone = 500;
+});
+await page.waitForTimeout(200);
+
+// Un paysan doit être sélectionné pour que le menu de construction
+// apparaisse. On le sélectionne directement plutôt qu'au clic : à ce stade les
+// paysans sont partis récolter et peuvent être hors de l'écran, ce qui ferait
+// échouer le test pour une raison sans rapport avec les murailles.
+const selected = await page.evaluate(() => {
+  const { world, selection } = window.rts;
+  const villager = [...world.entities.values()].find(
+    (e) => e.kind === 'unit' && e.owner === 0 && e.defId === 'paysan',
+  );
+  if (!villager) return false;
+  selection.clear();
+  selection.add(villager.id);
+  return true;
+});
+check('un paysan est disponible pour bâtir', selected);
+await page.waitForTimeout(300);
+
+const wallButton = page.locator('#actions-panel button', { hasText: 'Muraille' });
+check('le menu de construction propose la muraille', (await wallButton.count()) > 0);
+
+const wallsBefore = await page.evaluate(
+  () => [...window.rts.world.entities.values()].filter((e) => e.defId === 'muraille').length,
+);
+
+const anchor = await screenPositionOf('townCenter');
+await wallButton.first().click();
+await page.mouse.move(anchor.x - 220, anchor.y + 60);
+await page.mouse.down();
+await page.mouse.move(anchor.x - 60, anchor.y + 140, { steps: 10 });
+await page.mouse.up();
+await page.waitForTimeout(300);
+
+const wallsAfter = await page.evaluate(
+  () => [...window.rts.world.entities.values()].filter((e) => e.defId === 'muraille').length,
+);
+check(
+  'un glisser pose plusieurs segments de muraille',
+  wallsAfter - wallsBefore >= 3,
+  `${wallsAfter - wallsBefore} segment(s)`,
+);
+await shot('05-muraille');
 
 // — Combat —
 // Mesure à vitesse normale : à ×8, la mêlée se résout avant la capture d'état.

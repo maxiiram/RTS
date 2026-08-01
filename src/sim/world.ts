@@ -167,13 +167,13 @@ export function createWorld(seed = 20260731, size = MAP_SIZE): World {
  *
  * Les ressources ne sont pas semées une par une : elles forment des **zones
  * d'un seul tenant**, comme dans Age of Empires. Une forêt est une masse
- * compacte que l'on exploite par sa lisière, un filon d'or est un tas de
- * quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et à la
- * mine — on installe un dépôt au bord d'une zone — et ce qui fait des zones
- * du centre un enjeu territorial, plutôt qu'un semis d'arbres isolés.
+ * compacte que l'on exploite par sa lisière, un filon d'or un tas de quelques
+ * tuiles. C'est ce qui donne un sens au camp de bûcheron et à la mine — on
+ * installe un dépôt au bord d'une zone — et ce qui fait des zones du centre un
+ * enjeu territorial, plutôt qu'un semis d'arbres isolés.
  *
  * Les deux bases sont en diagonale opposée, avec une dotation strictement
- * identique : c'est un miroir, aucun camp n'est avantagé.
+ * miroir : aucun camp n'est avantagé.
  */
 function generateMap(world: World, seed: number): void {
   const rng = new Rng(seed);
@@ -190,8 +190,8 @@ function generateMap(world: World, seed: number): void {
 
   /** Réserve une zone dégagée : rien ne pousse trop près d'un centre-ville. */
   const clear = (cx: number, cy: number, radius: number): void => {
-    for (let y = cy - radius; y <= cy + radius; y++) {
-      for (let x = cx - radius; x <= cx + radius; x++) {
+    for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y++) {
+      for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x++) {
         if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
         if (Math.hypot(x - cx, y - cy) <= radius) take(x, y);
       }
@@ -217,8 +217,8 @@ function generateMap(world: World, seed: number): void {
   }
 
   // 2. Dotation de départ, à l'identique pour les deux royaumes. Les décalages
-  //    sont miroir, si bien que chaque camp trouve la même chose au même
-  //    endroit relatif : les distances de récolte sont rigoureusement égales.
+  //    sont en miroir : chaque camp trouve la même chose au même endroit
+  //    relatif, donc à distance de récolte rigoureusement égale.
   const layout: Array<{ resource: ResourceId; dx: number; dy: number; size: number }> = [
     { resource: 'food', dx: 10, dy: -1, size: 7 },
     { resource: 'food', dx: -2, dy: 10, size: 6 },
@@ -255,8 +255,7 @@ function generateMap(world: World, seed: number): void {
 
   // 4. Grandes forêts réparties sur la carte. Elles structurent le terrain :
   //    couloirs, contournements, endroits où poser une muraille.
-  const forests = 14;
-  for (let i = 0; i < forests; i++) {
+  for (let i = 0; i < 14; i++) {
     const x = rng.int(8, world.width - 9);
     const y = rng.int(8, world.height - 9);
     growPatch(world, rng, 'wood', x, y, rng.int(35, 90), isFree, take);
@@ -312,7 +311,6 @@ function growPatch(
     const step = neighbours[rng.int(0, 3)] as readonly [number, number];
     const x = from.x + step[0];
     const y = from.y + step[1];
-
     if (!isFree(x, y)) continue;
 
     take(x, y);
@@ -552,14 +550,13 @@ export function actionLabel(unit: Entity): string {
 /**
  * Recalcule ce que chaque joueur voit.
  *
- * Une case déjà explorée le reste définitivement — on se souvient du terrain —
- * mais elle repasse « hors de vue » dès qu'aucune unité ni bâtiment ne la
- * couvre. C'est la règle d'Age of Empires : le relief est mémorisé, ce qui s'y
- * passe ne l'est pas.
+ * Une case explorée le reste définitivement — on se souvient du terrain — mais
+ * elle repasse « hors de vue » dès qu'aucune unité ni bâtiment ne la couvre.
+ * C'est la règle d'Age of Empires : le relief est mémorisé, ce qui s'y passe
+ * ne l'est pas.
  */
 export function updateVisibility(world: World): void {
   for (const map of world.visibility) {
-    // Le visible retombe à « exploré » ; l'inexploré reste noir.
     for (let i = 0; i < map.length; i++) {
       if (map[i] === 2) map[i] = 1;
     }
@@ -567,10 +564,7 @@ export function updateVisibility(world: World): void {
 
   for (const e of world.entities.values()) {
     if (e.owner === null || e.hp <= 0) continue;
-
-    const range =
-      e.kind === 'unit' ? (UNITS[e.defId]?.los ?? 5) : (BUILDINGS[e.defId]?.los ?? 5);
-
+    const range = e.kind === 'unit' ? (UNITS[e.defId]?.los ?? 5) : (BUILDINGS[e.defId]?.los ?? 5);
     revealCircle(world.visibility[e.owner], world, e.x, e.y, range);
   }
 
@@ -606,12 +600,11 @@ export function visibilityAt(world: World, player: PlayerId, x: number, y: numbe
  * Le joueur peut-il voir cette entité ?
  *
  * Les unités adverses disparaissent dès qu'on cesse de les observer. Les
- * bâtiments et les gisements, eux, restent affichés une fois découverts : on
- * se souvient de ce qu'on a vu, même sans savoir ce qu'il s'y passe depuis.
+ * bâtiments et les gisements restent affichés une fois découverts : on se
+ * souvient de ce qu'on a vu, même sans savoir ce qu'il s'y passe depuis.
  */
 export function isEntityVisible(world: World, player: PlayerId, e: Entity): boolean {
   if (e.owner === player) return true;
-
   const state = visibilityAt(world, player, e.x, e.y);
   if (e.kind === 'unit') return state === 2;
   return state >= 1;

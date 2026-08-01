@@ -17,13 +17,13 @@ combattre. Une partie se joue du début à la fin, victoire comprise (destructio
 totale de l'adversaire, GDD §8).
 
 - **Carte isométrique** de 120 × 120 tuiles, générée à partir d'une graine :
-  deux bases en diagonale opposée, dotation de départ strictement identique
-  (un miroir, aucun camp n'est avantagé), et zones neutres au centre pour
-  donner un enjeu à l'expansion.
+  deux bases en diagonale opposée, dotation de départ strictement miroir
+  (aucun camp n'est avantagé), zones neutres au centre pour donner un enjeu à
+  l'expansion.
 - **Zones de ressources d'un seul tenant**, à la manière d'Age of Empires : une
   forêt est une masse compacte que l'on exploite par sa lisière, un filon d'or
-  un tas de quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et
-  à la mine — on pose un dépôt au bord d'une zone — et ce qui fait des zones du
+  un tas de quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et à
+  la mine — on pose un dépôt au bord d'une zone — et ce qui fait des zones du
   centre un enjeu territorial plutôt qu'un semis d'arbres isolés.
 - **Brouillard de guerre** : noir sur ce qui n'a jamais été exploré, voilé sur
   ce qui l'a été mais n'est plus observé. Le terrain et les bâtiments découverts
@@ -42,7 +42,9 @@ totale de l'adversaire, GDD §8).
 - **Récolte** des quatre ressources, avec dépôt automatique au bâtiment le plus
   proche et retour sur le gisement.
 - **Construction** des dix bâtiments, avec aperçu de l'emplacement et chantier
-  destructible pendant qu'il se bâtit.
+  destructible pendant qu'il se bâtit. Les **murailles se posent au glisser** :
+  un trait de souris pose toute la file, les cases occupées sont sautées, et le
+  bâtisseur enchaîne seul d'un segment au suivant.
 - **Production** d'unités en file d'attente, avec point de ralliement.
 - **Progression d'âge**, y compris ses prérequis en bâtiments. Le bandeau
   indique en clair ce qui manque encore — « Il manque 300 nourriture et
@@ -99,9 +101,9 @@ Limites connues du prototype, moins graves mais réelles :
   lent serait plus propre visuellement, mais rendrait la cavalerie inutilisable
   en escorte.
 - Pas de groupes de contrôle (Ctrl+1 pour mémoriser une sélection).
+- **Pas de mini-carte**, ce qui se sent nettement sur 120 × 120.
 - La lisière du brouillard est franche, tuile par tuile. Un dégradé serait plus
   doux à l'œil.
-- Pas de mini-carte, ce qui se sent nettement sur 120 × 120.
 - La ferme s'épuise et disparaît, mais rien ne prévient le joueur avant.
 
 ---
@@ -135,19 +137,24 @@ ne termine encastrée dans un obstacle.
 ## Le sol et le brouillard sont des images, pas des losanges
 
 Sur 120 × 120, dessiner le damier du sol tuile par tuile revient à redessiner
-14 400 losanges à chaque image — et autant pour le brouillard. C'est la
-première chose qui s'écroule quand la carte grandit.
+14 400 losanges à chaque image — et autant pour le brouillard. C'est la première
+chose qui s'écroule quand la carte grandit.
 
-Les deux calques sont donc devenus des **textures d'un pixel par tuile**,
-affichées avec la matrice de la projection isométrique. Cette projection étant
-une transformation linéaire, le carré du pixel (x, y) devient exactement le
-losange de la tuile (x, y) : le rendu est identique, le filtrage est en
-« plus proche voisin » donc parfaitement net, et il ne reste qu'un seul objet
-à afficher au lieu de 14 400. Le brouillard n'est réécrit que lorsque la vision
-change, deux fois par seconde.
+Les deux calques sont donc des **textures d'un pixel par tuile**, affichées avec
+la matrice de la projection isométrique. Cette projection étant une
+transformation linéaire, le carré du pixel (x, y) devient exactement le losange
+de la tuile (x, y) : rendu identique, filtrage au plus proche voisin donc
+parfaitement net, et un seul objet à afficher au lieu de 14 400. Le brouillard
+n'est réécrit que lorsque la vision change, deux fois par seconde. Les entités
+hors écran, ou que le joueur ne voit pas, n'ont aucun objet d'affichage.
 
-Les entités sont en plus découpées par la fenêtre d'affichage : une entité hors
-de l'écran, ou que le joueur ne voit pas, n'a aucun objet d'affichage.
+**Le brouillard est peint sur le sol, sous les entités.** Au-dessus, il
+recouvrait tout ce qui dépasse du sol : le haut des bâtiments, et surtout les
+barres de vie et de construction, tracées plusieurs dizaines de pixels plus haut
+que la tuile à laquelle elles appartiennent — on ne voyait plus avancer ses
+propres chantiers. Les entités dont on ne fait que se souvenir sont assombries à
+la place, ce qui donne le rendu d'Age of Empires : un bâtiment découvert reste
+visible, en plus terne.
 
 *Mesure honnête* : le conteneur qui a servi au développement n'a pas de carte
 graphique — un simple remplissage plein écran y plafonne à 13 images par
@@ -192,7 +199,7 @@ moindre écart de calcul entre deux machines fait diverger la partie.
 ## Tests
 
 ```bash
-npm test                  # 70 vérifications, dont 32 de simulation
+npm test                  # 74 vérifications, dont 36 de simulation
 npm run balance           # rapport d'équilibrage
 npm run typecheck
 node scripts/smoke.mjs    # parcours complet dans un vrai navigateur
@@ -234,6 +241,7 @@ Quatre bugs ont été trouvés par ces tests plutôt qu'en jouant :
 | Point de ralliement | Bâtiment sélectionné + clic droit |
 | Déplacer la vue | ZQSD, flèches, ou glisser au clic molette |
 | Zoom | Molette |
+| Poser une file de murailles | Sélectionner un paysan, choisir Muraille, puis glisser |
 | Annuler | Échap |
 
 Le carré coloré au-dessus d'une unité sélectionnée indique son action :

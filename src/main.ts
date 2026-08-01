@@ -15,11 +15,13 @@ import {
   canPlaceAt,
   orderGroup,
   placeBuilding,
+  placeBuildingRun,
   sandboxSpawn,
+  tilesAlongLine,
   train,
   advanceAge,
 } from './sim/commands.ts';
-import { screenToTile, tileToScreen } from './sim/grid.ts';
+import { footprintOf, screenToTile, tileToScreen } from './sim/grid.ts';
 import { stepWorld } from './sim/sim.ts';
 import type { Entity, World } from './sim/types.ts';
 import { createWorld, logEvent } from './sim/world.ts';
@@ -40,6 +42,19 @@ let buildMode: string | null = null;
 let pointerScreen = { x: 0, y: 0 };
 let dragStart: { x: number; y: number } | null = null;
 let panning = false;
+
+/**
+ * Départ d'un tracé de muraille, en tuiles.
+ *
+ * Seuls les bâtiments d'une seule tuile se posent en glissant : poser une
+ * enceinte segment par segment demande une centaine de clics.
+ */
+let wallDragStart: { x: number; y: number } | null = null;
+
+function isDraggableBuilding(buildingId: string): boolean {
+  const footprint = footprintOf(buildingId);
+  return footprint.w === 1 && footprint.h === 1;
+}
 
 const hud = new Hud({
   onTrain: (building, unitId) => {
@@ -157,7 +172,12 @@ function setupInput(canvas: HTMLCanvasElement): void {
     }
 
     if (buildMode) {
-      placeBuildingAt(event.offsetX, event.offsetY);
+      if (isDraggableBuilding(buildMode)) {
+        // On mémorise le départ ; la file est posée au relâchement.
+        wallDragStart = tileAtScreen(event.offsetX, event.offsetY);
+      } else {
+        placeBuildingAt(event.offsetX, event.offsetY);
+      }
       return;
     }
 
@@ -174,6 +194,12 @@ function setupInput(canvas: HTMLCanvasElement): void {
       panning = false;
       return;
     }
+
+    if (wallDragStart) {
+      placeWallRun(event.offsetX, event.offsetY);
+      return;
+    }
+
     if (event.button !== 0 || !dragStart) return;
 
     const moved = Math.hypot(event.offsetX - dragStart.x, event.offsetY - dragStart.y);
@@ -198,6 +224,7 @@ function setupInput(canvas: HTMLCanvasElement): void {
     keys.add(event.key.toLowerCase());
     if (event.key === 'Escape') {
       buildMode = null;
+      wallDragStart = null;
       selection.clear();
       hud.invalidateActions();
     }
@@ -247,6 +274,29 @@ function placeBuildingAt(screenX: number, screenY: number): void {
   hud.invalidateActions();
 }
 
+/** Pose toute une file de murailles, du point de départ au curseur. */
+function placeWallRun(screenX: number, screenY: number): void {
+  const start = wallDragStart;
+  wallDragStart = null;
+  if (!buildMode || !start) return;
+
+  const end = tileAtScreen(screenX, screenY);
+  const builders = selectedEntities().filter(
+    (e) => e.kind === 'unit' && e.owner === PLAYER && UNITS[e.defId]?.gather,
+  );
+
+  const result = placeBuildingRun(world, PLAYER, buildMode, start, end, builders);
+
+  if (result.placed === 0) {
+    if (result.reason) logEvent(world, result.reason);
+  } else {
+    logEvent(world, `${result.placed} segment(s) de muraille en chantier.`);
+    // On reste en mode construction : on enchaîne souvent plusieurs tronçons.
+  }
+
+  hud.invalidateActions();
+}
+
 function updateCamera(dt: number): void {
   const step = 600 * dt;
   let dx = 0;
@@ -262,15 +312,20 @@ function updateCamera(dt: number): void {
 
 function currentGhost(): GhostPreview | null {
   if (buildMode) {
-    const tile = tileAtScreen(pointerScreen.x, pointerScreen.y);
-    const tileX = Math.floor(tile.x);
-    const tileY = Math.floor(tile.y);
+    const cursor = tileAtScreen(pointerScreen.x, pointerScreen.y);
+
+    // Pendant un glisser, l'aperçu montre toute la file : le joueur voit
+    // exactement où le mur passera avant de relâcher.
+    const line = wallDragStart ? tilesAlongLine(wallDragStart, cursor) : [cursor];
+
     return {
       kind: 'building',
       buildingId: buildMode,
-      tileX,
-      tileY,
-      valid: canPlaceAt(world, buildMode, tileX, tileY),
+      tiles: line.map((tile) => {
+        const tileX = Math.floor(tile.x);
+        const tileY = Math.floor(tile.y);
+        return { x: tileX, y: tileY, valid: canPlaceAt(world, buildMode as string, tileX, tileY) };
+      }),
     };
   }
 

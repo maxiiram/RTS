@@ -4,10 +4,10 @@ import type { AgeDef, AgeId } from './types.ts';
  * Progression en 3 âges (GDD §5).
  *
  * Les coûts et durées sont calibrés pour le rythme « lent et stratégique ».
- * Ils ont été relevés après un premier essai jugé trop expéditif : sur la
- * grande carte, l'âge 2 tombe autour de 11-13 minutes et l'âge 3 vers
- * 25 minutes, pour une partie qui ressemble à une escarmouche d'Age of
- * Empires plutôt qu'à une course de dix minutes.
+ * Ils ont été relevés après un essai jugé trop expéditif : sur la grande carte,
+ * l'âge 2 tombe autour de 11-13 minutes et l'âge 3 vers 25 minutes, pour une
+ * partie qui ressemble à une escarmouche d'Age of Empires plutôt qu'à une
+ * course de dix minutes.
  */
 export const AGES: Record<AgeId, AgeDef> = {
   1: {

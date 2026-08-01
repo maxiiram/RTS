@@ -15,7 +15,7 @@ import { UNITS } from '../data/units.ts';
 import type { AgeId, ResourceId, UnitDef } from '../data/types.ts';
 import { damagePerHit, type DamageTarget } from '../balance/combat.ts';
 import { findPath, isBlocked, nearestFreeTile, rebuildBlocked } from './grid.ts';
-import { orderGather, orderIdle, orderMove } from './commands.ts';
+import { orderBuild, orderGather, orderIdle, orderMove } from './commands.ts';
 import type { Entity, Point, World } from './types.ts';
 import {
   approachPoint,
@@ -335,7 +335,23 @@ function handleBuild(world: World, e: Entity, def: UnitDef, dt: number): void {
     rebuildBlocked(world);
     recomputePopulation(world);
     logEvent(world, `${buildingDef.nameFr} terminé.`);
-    orderIdle(e);
+
+    // Un bâtisseur qui vient de finir enchaîne sur le chantier voisin. Sans
+    // ça, poser une muraille d'un glisser obligerait à redonner l'ordre à
+    // chaque segment.
+    const next = findNearest(
+      world,
+      e,
+      (other) =>
+        other.kind === 'building' &&
+        other.owner === e.owner &&
+        other.buildProgress < 1 &&
+        other.hp > 0,
+      12,
+    );
+
+    if (next) orderBuild(e, next);
+    else orderIdle(e);
   }
 }
 

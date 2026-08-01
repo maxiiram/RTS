@@ -396,6 +396,91 @@ export function placeBuilding(
   return { ok: true };
 }
 
+/**
+ * Tuiles traversées par une ligne, algorithme de Bresenham.
+ * Sert à poser une muraille d'un seul glisser de souris.
+ */
+export function tilesAlongLine(from: Point, to: Point): Point[] {
+  const x0 = Math.floor(from.x);
+  const y0 = Math.floor(from.y);
+  const x1 = Math.floor(to.x);
+  const y1 = Math.floor(to.y);
+
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const stepX = x0 < x1 ? 1 : -1;
+  const stepY = y0 < y1 ? 1 : -1;
+
+  let error = dx - dy;
+  let x = x0;
+  let y = y0;
+  const tiles: Point[] = [];
+
+  // Garde-fou : une ligne ne peut pas dépasser la diagonale de la carte.
+  for (let guard = 0; guard < 512; guard++) {
+    tiles.push({ x, y });
+    if (x === x1 && y === y1) break;
+
+    const doubled = error * 2;
+    if (doubled > -dy) {
+      error -= dy;
+      x += stepX;
+    }
+    if (doubled < dx) {
+      error += dx;
+      y += stepY;
+    }
+  }
+
+  return tiles;
+}
+
+/**
+ * Pose une file de bâtiments d'une tuile le long d'une ligne.
+ *
+ * Poser une muraille segment par segment est un supplice : c'est une centaine
+ * de clics pour enceindre une base. On trace donc la ligne d'un glisser, et on
+ * pose autant de segments que les ressources le permettent — les cases
+ * occupées sont simplement sautées, ce qui laisse le mur épouser le terrain.
+ */
+export function placeBuildingRun(
+  world: World,
+  owner: PlayerId,
+  buildingId: string,
+  from: Point,
+  to: Point,
+  builders: Entity[],
+): { placed: number; reason?: string } {
+  const def = BUILDINGS[buildingId];
+  if (!def) return { placed: 0, reason: 'Bâtiment inconnu' };
+
+  const allowed = canBuild(world, owner, buildingId);
+  if (!allowed.ok) return { placed: 0, ...(allowed.reason ? { reason: allowed.reason } : {}) };
+
+  const sites: Entity[] = [];
+  for (const tile of tilesAlongLine(from, to)) {
+    // On s'arrête net dès que la pierre manque, plutôt que de poser des
+    // chantiers que le joueur ne pourra jamais terminer.
+    if (!canAfford(world, owner, def.cost)) break;
+    if (!canPlaceAt(world, buildingId, tile.x, tile.y)) continue;
+
+    pay(world, owner, def.cost);
+    sites.push(spawnBuilding(world, buildingId, owner, tile.x, tile.y, false));
+  }
+
+  // Les bâtisseurs partent sur le premier segment ; ils enchaîneront ensuite
+  // d'eux-mêmes sur les suivants (voir `handleBuild` dans sim.ts).
+  const first = sites[0];
+  if (first) {
+    for (const builder of builders) {
+      if (UNITS[builder.defId]?.gather) orderBuild(builder, first);
+    }
+  }
+
+  if (sites.length === 0) return { placed: 0, reason: 'Aucun emplacement libre' };
+  return { placed: sites.length };
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Progression d'âge
 // ───────────────────────────────────────────────────────────────────────────

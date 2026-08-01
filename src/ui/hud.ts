@@ -49,15 +49,20 @@ function formatCost(cost: Cost): string {
   return parts.join('  ') || 'gratuit';
 }
 
-/** « 320 nourriture et 150 or » — vide si rien n'est demandé. */
-function formatResourceList(cost: Cost): string {
-  const parts = RESOURCE_IDS.filter((r) => (cost[r] ?? 0) > 0).map(
-    (r) => `${cost[r]} ${RESOURCES[r].nameFr.toLowerCase()}`,
-  );
-
+/** « a, b et c » — énumération française correcte, vide si la liste l'est. */
+function joinFr(parts: string[]): string {
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0] as string;
   return `${parts.slice(0, -1).join(', ')} et ${parts[parts.length - 1]}`;
+}
+
+/** « 320 nourriture et 150 or » — vide si rien n'est demandé. */
+function formatResourceList(cost: Cost): string {
+  return joinFr(
+    RESOURCE_IDS.filter((r) => (cost[r] ?? 0) > 0).map(
+      (r) => `${cost[r]} ${RESOURCES[r].nameFr.toLowerCase()}`,
+    ),
+  );
 }
 
 /**
@@ -202,10 +207,11 @@ export class Hud {
       return;
     }
 
-    const gaps: string[] = [];
-
-    const missing = formatResourceList(progress.missing);
-    if (missing) gaps.push(missing);
+    // Une seule énumération pour les ressources et les bâtiments : deux listes
+    // accolées donnaient « 850 nourriture et 500 or et 2 bâtiments ».
+    const gaps = RESOURCE_IDS.filter((r) => (progress.missing[r] ?? 0) > 0).map(
+      (r) => `${progress.missing[r]} ${RESOURCES[r].nameFr.toLowerCase()}`,
+    );
 
     const buildingsShort = progress.buildingsRequired - progress.buildingsOwned;
     if (buildingsShort > 0) {
@@ -219,7 +225,7 @@ export class Hud {
       this.advanceHint.textContent = `Prêt — coûte ${formatResourceList(progress.cost)}`;
       this.advanceHint.className = 'ready';
     } else {
-      this.advanceHint.textContent = `Il manque ${gaps.join(' et ')}`;
+      this.advanceHint.textContent = `Il manque ${joinFr(gaps)}`;
       this.advanceHint.className = 'missing';
     }
 
