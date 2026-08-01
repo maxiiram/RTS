@@ -16,6 +16,10 @@ npm run dev     # http://localhost:5173
 combattre. Une partie se joue du début à la fin, victoire comprise (destruction
 totale de l'adversaire, GDD §8).
 
+- **Pixel art complet** : douze unités, onze bâtiments, décor et sol, peints
+  pixel par pixel dans `src/art` et regroupés sur une planche de référence
+  (`npm run sprites`). Palette chaude verrouillée, lumière au nord-ouest,
+  contour unique — voir la [charte graphique](ART.md).
 - **Carte isométrique** de 120 × 120 tuiles, générée à partir d'une graine :
   deux bases en diagonale opposée, dotation de départ strictement miroir
   (aucun camp n'est avantagé), zones neutres au centre pour donner un enjeu à
@@ -74,8 +78,10 @@ tables change immédiatement le jeu**, sans toucher à une ligne de code.
 
 Par ordre d'importance pour la suite :
 
-1. **Aucun graphisme.** Tout est en formes géométriques, sur la palette chaude
-   du GDD §10. Les sprites viendront avec le moodboard.
+1. **Aucune animation.** Les sprites sont en place (voir la
+   [direction artistique](ART.md)) mais tout est figé : pas de cycle de marche,
+   pas de geste d'attaque, et une unité est vue de face quel que soit son cap.
+   C'est le prochain grand chantier visuel, et le plus coûteux.
 2. **L'IA n'est pas soumise au brouillard.** Le joueur l'est, elle non : elle
    raisonne encore sur l'état complet de la carte. C'est le comportement
    d'Age of Empires 1, mais ça reste une inégalité à corriger.

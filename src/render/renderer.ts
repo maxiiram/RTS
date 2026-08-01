@@ -6,7 +6,16 @@
  * PixiJS, et permettra à un serveur de simuler sans afficher quoi que ce soit.
  */
 
-import { Application, BufferImageSource, Container, Graphics, Matrix, Sprite, Texture } from 'pixi.js';
+import {
+  Application,
+  BufferImageSource,
+  Container,
+  Graphics,
+  Matrix,
+  Sprite,
+  Texture,
+  TilingSprite,
+} from 'pixi.js';
 
 import { BUILDINGS } from '../data/buildings.ts';
 import { TILE_HEIGHT, TILE_WIDTH } from '../data/constants.ts';
@@ -15,11 +24,13 @@ import { tileToScreen } from '../sim/grid.ts';
 import type { Entity, PlayerId, World } from '../sim/types.ts';
 import { currentAction, isEntityVisible, visibilityAt } from '../sim/world.ts';
 import { ACTION_COLORS, PALETTE } from './palette.ts';
-import { buildingContext, resourceContext, unitContext, wallContext, WALL_LINKS } from './shapes.ts';
+import { buildingSprite, groundSprite, resourceSprite, unitSprite, wallSprite } from '../art/index.ts';
+import { WALL_LINKS } from '../art/buildings.ts';
+import { textureFor } from './textures.ts';
 
 interface EntityView {
   container: Container;
-  body: Graphics;
+  body: Sprite;
   overlay: Graphics;
   /** Clé du visuel affiché, pour ne le reconstruire qu'en cas de changement. */
   visualKey: string;
@@ -32,7 +43,7 @@ export class Renderer {
   readonly app = new Application();
   readonly world: Container = new Container();
 
-  private terrain: GridLayer | null = null;
+  private terrain: TilingSprite | null = null;
   private fog: GridLayer | null = null;
   private entityLayer = new Container();
   private silhouetteLayer = new Graphics();
@@ -77,22 +88,32 @@ export class Renderer {
    * 14 400 sur une carte de 120 × 120.
    */
   buildLayers(world: World): void {
-    this.terrain?.sprite.destroy();
+    this.terrain?.destroy();
     this.fog?.sprite.destroy();
 
-    this.terrain = createGridLayer(world.width, world.height);
+    // ── Sol ───────────────────────────────────────────────────────────────
+    //
+    // Le motif de prairie fait exactement une tuile de large et une de haut,
+    // et se répète sans couture dans la grille isométrique. Un seul objet
+    // couvre donc toute la carte, quelle que soit sa taille — là où dessiner
+    // 14 400 losanges mettait le jeu à genoux.
+    const ground = groundSprite();
+    const bounds = mapBounds(world);
+
+    this.terrain = new TilingSprite({
+      texture: textureFor(ground),
+      width: bounds.width,
+      height: bounds.height,
+    });
+    this.terrain.position.set(bounds.x, bounds.y);
+    // Le motif doit rester calé sur l'origine de la grille, sinon le damier
+    // se décale d'une demi-tuile par rapport aux entités.
+    this.terrain.tilePosition.set(-bounds.x, -bounds.y);
+
+    // ── Brouillard ────────────────────────────────────────────────────────
     this.fog = createGridLayer(world.width, world.height);
 
-    // Damier très léger : donne du relief sans distraire.
-    for (let y = 0; y < world.height; y++) {
-      for (let x = 0; x < world.width; x++) {
-        const color = (x + y) % 2 === 0 ? PALETTE.grassLight : PALETTE.grassDark;
-        writePixel(this.terrain, x, y, color, 255);
-      }
-    }
-    this.terrain.source.update();
-
-    // Le brouillard est peint sur le **sol**, sous les entités.
+    // Le brouillard est peint sur le sol, sous les entités.
     //
     // Au-dessus, il recouvrait tout ce qui dépasse du sol : le haut des
     // bâtiments, et surtout les barres de vie et de construction, tracées
@@ -104,7 +125,7 @@ export class Renderer {
     // visible, en plus terne.
     this.world.removeChildren();
     this.world.addChild(
-      this.terrain.sprite,
+      this.terrain,
       this.fog.sprite,
       this.entityLayer,
       this.silhouetteLayer,
@@ -317,16 +338,20 @@ export class Renderer {
     if (!view || view.visualKey !== visualKey) {
       view?.container.destroy({ children: true });
 
-      const context =
+      const art =
         entity.kind === 'unit'
-          ? unitContext(entity.defId, color)
+          ? unitSprite(entity.defId, color)
           : entity.kind === 'building'
             ? entity.defId === 'muraille'
-              ? wallContext(color, links, isSite)
-              : buildingContext(entity.defId, color, isSite)
-            : resourceContext(entity.defId);
+              ? wallSprite(color, links, isSite)
+              : buildingSprite(entity.defId, color, isSite)
+            : resourceSprite(entity.defId, Math.floor(entity.x), Math.floor(entity.y));
 
-      const body = new Graphics(context);
+      const body = new Sprite(textureFor(art));
+      // L'ancre du sprite se pose sur le centre de la tuile : c'est ce qui
+      // aligne les pieds d'une unité et la base d'un bâtiment sur le sol.
+      body.anchor.set(art.anchorX / art.width, art.anchorY / art.height);
+
       const overlay = new Graphics();
       const container = new Container();
       container.addChild(body, overlay);
@@ -538,25 +563,38 @@ function spriteBox(entity: Entity): {
   halfHeight: number;
   offsetY: number;
 } {
-  if (entity.kind === 'building') {
-    const footprint = BUILDINGS[entity.defId]?.footprint ?? { w: 2, h: 2 };
-    const hw = ((footprint.w + footprint.h) * TILE_WIDTH) / 4;
-    const wallHeight = Math.min(46, 12 + (footprint.w + footprint.h) * 4);
-    const hh = ((footprint.w + footprint.h) * TILE_HEIGHT) / 4;
-    return {
-      halfWidth: hw,
-      halfHeight: (wallHeight + hh * 2) / 2,
-      offsetY: wallHeight / 2,
-    };
-  }
+  const art =
+    entity.kind === 'unit'
+      ? unitSprite(entity.defId, 0xffffff)
+      : entity.kind === 'building'
+        ? entity.defId === 'muraille'
+          ? wallSprite(0xffffff, 0)
+          : buildingSprite(entity.defId, 0xffffff)
+        : resourceSprite(entity.defId, Math.floor(entity.x), Math.floor(entity.y));
 
-  if (entity.kind === 'resource') {
-    return entity.defId === 'wood'
-      ? { halfWidth: 11, halfHeight: 14, offsetY: 14 }
-      : { halfWidth: 10, halfHeight: 8, offsetY: 6 };
-  }
+  return {
+    halfWidth: art.width / 2,
+    halfHeight: art.height / 2,
+    // Décalage du centre du sprite par rapport au point d'ancrage au sol.
+    offsetY: art.anchorY - art.height / 2,
+  };
+}
 
-  return { halfWidth: 9, halfHeight: 12, offsetY: 12 };
+/** Rectangle, en pixels écran, couvert par la carte entière. */
+function mapBounds(world: World): { x: number; y: number; width: number; height: number } {
+  const corners = [
+    tileToScreen(0, 0),
+    tileToScreen(world.width, 0),
+    tileToScreen(0, world.height),
+    tileToScreen(world.width, world.height),
+  ];
+
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
 export type GhostPreview =

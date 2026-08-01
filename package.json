@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "balance": "node src/balance/report.ts"
+    "balance": "node src/balance/report.ts",
+    "sprites": "node scripts/spritesheet.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

@@ -21,11 +21,11 @@ destruction de la base adverse, contre une IA d'escarmouche.
 - ✅ [Prototype jouable](docs/PROTOTYPE.md) — carte, récolte, construction, combat, IA
 - ✅ Brouillard de guerre et carte de 120 × 120
 - ⬜ Arbre technologique
-- ⬜ Direction artistique : palette et sprites
+- ✅ [Direction artistique](docs/ART.md) — palette, sprites, planche de référence
 - ⬜ Multijoueur
 
-Tout est encore en formes géométriques : la production graphique attend le
-moodboard (GDD §10).
+L'art est en place — pixel art 8-bit, palette chaude, tout le jeu couvert. Il
+manque l'animation : rien ne bouge encore.
 
 ## Stack
 
@@ -44,6 +44,7 @@ npm run dev        # serveur de développement
 npm run build      # page statique dans dist/, hébergeable telle quelle
 npm test           # 74 vérifications : données, équilibrage, simulation
 npm run balance    # rapport d'équilibrage : duels, rendements, rythme
+npm run sprites    # planche de référence de tous les sprites
 npm run typecheck
 
 node scripts/smoke.mjs   # parcours joueur complet dans un navigateur
@@ -55,7 +56,8 @@ il montre immédiatement ce que le changement casse ailleurs.
 ## Organisation
 
 ```
-docs/         GDD, équilibrage, prototype
+docs/         GDD, équilibrage, prototype, direction artistique
+src/art/      Sprites peints pixel par pixel — aucune image dans le dépôt
 src/data/     Tables de données pures — la source de vérité des chiffres
 src/balance/  Modèle de combat, analyse économique, rapport
 src/sim/      Simulation déterministe : monde, grille, ordres, IA
