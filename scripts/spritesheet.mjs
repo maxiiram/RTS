@@ -30,7 +30,10 @@ const CELL_BY_SECTION = {
   Chantiers: { cell: 148 * SCALE, columns: 5 },
   Murailles: { cell: 52 * SCALE, columns: 8 },
 };
-const DEFAULT_CELL = { cell: 68 * SCALE, columns: 10 };
+// 76 pixels : c'est la plus haute unité (le porte-étendard, 48 de haut, ancré
+// à 43) qui fixe la taille de cellule. À 68, elle débordait sur la rangée du
+// dessus.
+const DEFAULT_CELL = { cell: 76 * SCALE, columns: 10 };
 const HEADER = 16;
 const MARGIN = 12;
 

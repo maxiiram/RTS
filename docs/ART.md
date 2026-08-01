@@ -21,14 +21,14 @@ avoir envie d'y passer une après-midi, pas d'y survivre.
 > **Écart assumé avec le GDD §10.** Le document parlait de « 8-bit
 > minimaliste ». Après un premier essai, la direction a été infléchie vers plus
 > de matière : maçonnerie appareillée, colombages, rangs de tuiles, anatomie
-> réelle des chevaux. Le nombre de pixels n'a pas beaucoup bougé — c'est la
-> densité d'information dans chacun qui a augmenté. Le GDD mérite d'être mis à
-> jour sur ce point.
+> réelle des chevaux et des figures. Le nombre de pixels n'a pas beaucoup bougé
+> — c'est la densité d'information dans chacun qui a augmenté. Le GDD mérite
+> d'être mis à jour sur ce point.
 
 Trois conséquences pratiques :
 
-- **Peu de pixels par entité.** Un fantassin tient dans 20 × 26, un cavalier
-  dans 34 × 36. C'est ce qui rend la production tenable en solo.
+- **Peu de pixels par entité.** Un fantassin tient dans 24 × 34, un cavalier
+  dans 42 × 48. C'est ce qui rend la production tenable en solo.
 - **Aucun dégradé, aucun anticrénelage.** Chaque pixel est posé franchement. À
   cette taille, une transition douce se lit comme une tache sale. Le volume
   vient des valeurs et des arêtes, jamais du flou.
@@ -95,15 +95,58 @@ leurs caractéristiques de jeu. Un joueur doit lire une armée **sans infobulle*
 
 | Signe | Sens |
 |---|---|
-| Cheval de profil, cape, casque | cavalerie |
-| Casque fermé, plastron d'acier | armure lourde |
-| Arc tenu devant | unité à distance |
+| Cheval de profil, cape, chausses colorées | cavalerie |
+| Heaume fermé, plastron, spallières | armure lourde |
+| Arc bandé, carquois dans le dos | unité à distance |
 | Hampe dépassant la tête | arme d'hast, anti-cavalerie |
-| Chapeau de paille, outil | paysan |
-| Bannière | porte-étendard |
-| Bouclier aux couleurs du royaume | infanterie de mêlée |
+| Chapeau de paille, tablier de cuir, outil | paysan |
+| Bannière à queue d'aronde | porte-étendard |
+| Écu triangulaire aux couleurs du royaume | infanterie de mêlée |
 
 La tunique porte toujours la couleur du royaume.
+
+**Aucun de ces signes n'est choisi à la main.** Ils se déduisent tous de
+`src/data/units.ts` : l'armure décide du plastron, la portée de l'arc, le bonus
+anti-cavalerie de la hampe, le rôle du tablier, l'aura de la bannière.
+Rééquilibrer une unité change donc son allure — une unité qui gagne de
+l'armure gagne un plastron, sans qu'on ait à rouvrir le fichier de dessin.
+
+### L'anatomie
+
+Toutes les figures sont bâties sur le même squelette, en **proportions
+héroïques** — une tête pour quatre, plutôt que pour sept. C'est ce qui rend un
+visage lisible à cette taille sans donner un personnage difforme.
+
+Trois repères verticaux suffisent à tout accrocher : le sol, la taille et les
+épaules. Le reste — cou, tête, bras, arme, écu — s'en déduit, à pied comme à
+cheval. Un cavalier n'est pas dessiné à part : c'est la même figure, dont les
+jambes se plient sur le flanc au lieu de porter le poids.
+
+Quatre détails font la différence entre une figure et un mannequin :
+
+1. **Des épaules plus larges que la taille.** Deux pixels d'écart suffisent, et
+   c'est ce qui sépare un soldat d'un paysan avant même qu'on voie son
+   équipement.
+2. **Un appui décalé.** Deux jambes parallèles donnent un pantin ; un pas d'un
+   pixel entre les deux, la jambe arrière plus sombre, et la figure a un poids.
+3. **Un cou.** Sans lui, la tête est une bille posée sur les épaules.
+4. **Une ceinture.** Elle coupe la figure au bon endroit et lui donne son
+   échelle. Sans elle, buste et jambes se lisent comme une seule pièce.
+
+Et la règle qui vaut pour toutes les figures du jeu : **les membres du côté
+opposé sont plus sombres et légèrement décalés**. Ce décalage, plus que tout le
+reste, empêche une silhouette de se lire comme un bloc.
+
+### Les quatre paysans se distinguent par leur outil
+
+Ils partagent la même tenue ; c'est l'outil qui dit le métier, et il est choisi
+d'après la ressource que l'unité récolte le mieux — cognée pour le bûcheron,
+pic pour le mineur, faux pour le fermier, houe pour le paysan polyvalent.
+
+Un outil se lit à l'endroit où il travaille : la cognée et le pic se portent à
+l'épaule, fer en l'air ; la faux et la houe se tiennent fer vers le sol.
+Dressée en tête de manche, la faux se lisait comme un bec d'oiseau au-dessus du
+chapeau.
 
 ### Le cheval
 
@@ -116,9 +159,33 @@ Le détail qui fait tout : **les deux membres du côté opposé sont plus sombre
 légèrement décalés**. C'est ce décalage, plus que tout le reste, qui donne la
 profondeur et empêche la monture de se lire comme un bloc.
 
+Une **liste blanche** court sur le chanfrein. Sans ce repère clair, la tête se
+perdait dans l'encolure : un sprite entièrement brun n'a aucune arête où
+accrocher un regard.
+
 Le cavalier reçoit une cape qui tombe derrière son buste jusqu'à la croupe.
 Elle prolonge sa ligne et l'assied visuellement sur sa monture, au lieu de le
-poser dessus.
+poser dessus. Elle est **entièrement dans la valeur sombre du royaume** : dans
+la valeur moyenne, elle formait avec l'écu et la tunique un seul aplat de
+couleur. Une cape est un fond, pas un motif.
+
+### Ce qu'un sprite composite oblige à surveiller
+
+Une figure posée sur une monture, c'est deux dessins qui se recouvrent — et
+c'est là que tout se joue. Trois pièges, tous rencontrés :
+
+- **L'occlusion.** Le bras armé du cavalier tombait pile sur l'encolure et la
+  tête du cheval disparaissait derrière une épée. Cheval et cavalier sont donc
+  reculés de deux pixels sur la selle. Une monture dont on ne voit plus la tête
+  ne se lit plus comme une monture.
+- **Les alignements accidentels.** La ceinture du cavalier, l'arçon de la selle
+  et l'encolure du cheval étaient à la même hauteur et dans la même valeur :
+  ensemble ils formaient une barre d'un bout à l'autre du sprite. La ceinture
+  est passée au cuir sombre, la selle aussi, les rênes s'arrêtent au garrot.
+- **Deux bruns voisins.** Une lance en bois nu passant devant une robe baie
+  devenait une bûche. Sa hampe est peinte, bandée aux couleurs du royaume. De
+  même, les chausses du cavalier portent la couleur du royaume et non le drap
+  écru des fantassins : sur un flanc brun, une jambe beige disparaît.
 
 ---
 
