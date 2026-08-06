@@ -25,6 +25,7 @@ import type { Entity, PlayerId, World } from '../sim/types.ts';
 import { currentAction, isEntityVisible, visibilityAt } from '../sim/world.ts';
 import { ACTION_COLORS, PALETTE } from './palette.ts';
 import { buildingSprite, groundSprite, resourceSprite, unitSprite, wallSprite } from '../art/index.ts';
+import { frameCount, type Motion, STRIDE_LENGTH } from '../art/animation.ts';
 import { WALL_LINKS } from '../art/buildings.ts';
 import { textureFor } from './textures.ts';
 
@@ -34,6 +35,8 @@ interface EntityView {
   overlay: Graphics;
   /** Clé du visuel affiché, pour ne le reconstruire qu'en cas de changement. */
   visualKey: string;
+  /** Image d'animation affichée, pour n'échanger la texture qu'au changement. */
+  clipKey: string;
   lastHp: number;
   lastSelected: boolean;
   lastAction: string;
@@ -55,6 +58,10 @@ export class Renderer {
 
   /** Dernier état du brouillard dessiné, pour ne le refaire qu'au besoin. */
   private fogVersion = -1;
+
+  /** Opacité du brouillard et tampon de travail du flou, alloués une fois. */
+  private fogAlpha = new Float32Array(0);
+  private fogScratch = new Float32Array(0);
 
   /**
    * Murailles indexées par tuile, reconstruit à chaque image.
@@ -342,18 +349,44 @@ export class Renderer {
    *
    * On ne repeint que quand la vision a changé — deux fois par seconde — et le
    * coût à l'affichage est celui d'une seule image, quelle que soit la carte.
+   *
+   * === Pourquoi la lisière est floutée ===
+   *
+   * Une opacité par tuile donne un pixel de texture par tuile, et donc un
+   * losange plein par tuile : la limite de l'exploré était un escalier de
+   * losanges noirs, aussi net qu'un bord de puzzle. C'est ce qui se voyait en
+   * premier sur une capture, avant le terrain et avant les unités.
+   *
+   * On lisse donc l'opacité — un flou séparable de deux tuiles de rayon —
+   * avant de l'écrire, et la texture est échantillonnée en bilinéaire. Les
+   * deux ensemble transforment l'escalier en dégradé de quelques tuiles, ce
+   * que fait tout RTS 2D depuis vingt ans. La *vision* n'a pas changé pour
+   * autant : elle reste calculée à la tuile, seul son affichage est adouci.
    */
   private drawFog(world: World, player: PlayerId): void {
     if (!this.fog || world.visibilityVersion === this.fogVersion) return;
     this.fogVersion = world.visibilityVersion;
 
     const map = world.visibility[player];
+    const width = world.width;
+    const height = world.height;
 
-    for (let y = 0; y < world.height; y++) {
-      for (let x = 0; x < world.width; x++) {
-        const state = map[y * world.width + x] ?? 0;
-        // Jamais exploré : noir opaque. Exploré mais hors de vue : voilé.
-        writePixel(this.fog, x, y, 0x000000, state === 2 ? 0 : state === 1 ? 120 : 255);
+    if (this.fogAlpha.length !== width * height) {
+      this.fogAlpha = new Float32Array(width * height);
+      this.fogScratch = new Float32Array(width * height);
+    }
+
+    for (let i = 0; i < map.length; i++) {
+      // Jamais exploré : noir opaque. Exploré mais hors de vue : voilé.
+      const state = map[i] ?? 0;
+      this.fogAlpha[i] = state === 2 ? 0 : state === 1 ? 120 : 255;
+    }
+
+    blurField(this.fogAlpha, this.fogScratch, width, height, FOG_BLUR);
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        writePixel(this.fog, x, y, 0x000000, Math.round(this.fogAlpha[y * width + x] ?? 255));
       }
     }
 
@@ -369,20 +402,28 @@ export class Renderer {
     const links = entity.defId === 'muraille' ? this.wallLinks(entity) : 0;
     const visualKey = `${entity.kind}:${entity.defId}:${color}:${isSite}:${links}`;
 
+    // L'animation ne fait pas partie de l'identité du visuel : changer d'image
+    // ne doit pas reconstruire l'objet d'affichage, seulement échanger sa
+    // texture. Toutes les images d'une unité partagent le même gabarit et le
+    // même point d'ancrage, donc l'échange se réduit à une affectation.
+    const clip = entity.kind === 'unit' ? unitClip(world, entity) : null;
+    const clipKey = clip ? `${clip.motion}:${clip.frame}` : '';
+
+    const artFor = (): ReturnType<typeof unitSprite> =>
+      entity.kind === 'unit'
+        ? unitSprite(entity.defId, color, clip?.motion, clip?.frame)
+        : entity.kind === 'building'
+          ? entity.defId === 'muraille'
+            ? wallSprite(color, links, isSite)
+            : buildingSprite(entity.defId, color, isSite)
+          : resourceSprite(entity.defId, Math.floor(entity.x), Math.floor(entity.y));
+
     let view = this.views.get(entity.id);
 
     if (!view || view.visualKey !== visualKey) {
       view?.container.destroy({ children: true });
 
-      const art =
-        entity.kind === 'unit'
-          ? unitSprite(entity.defId, color)
-          : entity.kind === 'building'
-            ? entity.defId === 'muraille'
-              ? wallSprite(color, links, isSite)
-              : buildingSprite(entity.defId, color, isSite)
-            : resourceSprite(entity.defId, Math.floor(entity.x), Math.floor(entity.y));
-
+      const art = artFor();
       const body = new Sprite(textureFor(art));
       // L'ancre du sprite se pose sur le centre de la tuile : c'est ce qui
       // aligne les pieds d'une unité et la base d'un bâtiment sur le sol.
@@ -398,11 +439,15 @@ export class Renderer {
         body,
         overlay,
         visualKey,
+        clipKey,
         lastHp: -1,
         lastSelected: !selected,
         lastAction: '',
       };
       this.views.set(entity.id, view);
+    } else if (view.clipKey !== clipKey) {
+      view.clipKey = clipKey;
+      view.body.texture = textureFor(artFor());
     }
 
     const p = tileToScreen(entity.x, entity.y);
@@ -570,7 +615,10 @@ function createGridLayer(width: number, height: number): GridLayer {
     width,
     height,
     alphaMode: 'premultiplied-alpha',
-    scaleMode: 'nearest',
+    // Bilinéaire, contrairement à tout le reste du jeu : c'est le seul calque
+    // qui n'est pas du dessin mais un champ de valeurs. En « nearest », chaque
+    // tuile devenait un losange plein et la lisière du brouillard un escalier.
+    scaleMode: 'linear',
   });
 
   const sprite = new Sprite(new Texture({ source }));
@@ -616,8 +664,98 @@ function spriteBox(entity: Entity): {
   };
 }
 
+/**
+ * Quelle animation joue une unité, et à quelle image.
+ *
+ * Chaque cycle est cadencé par ce que fait réellement l'unité, jamais par un
+ * compteur décoratif — c'est ce qui fait la différence entre une figure qui
+ * s'agite et une figure qui travaille :
+ *
+ * - la **marche** avance avec la distance parcourue, si bien que les pieds ne
+ *   patinent pas quand la vitesse change (un cavalier va deux fois plus vite
+ *   qu'un fantassin, sa foulée aussi) ;
+ * - le **coup d'arme** suit le rechargement d'attaque, si bien que l'image
+ *   d'impact tombe sur le coup réellement porté et non à côté ;
+ * - **récolte et construction** tournent sur l'horloge de simulation, décalées
+ *   par l'identifiant, pour qu'un chantier de six paysans ne ressemble pas à
+ *   un ballet synchronisé.
+ *
+ * Purement graphique : rien ici ne modifie le monde.
+ */
+function unitClip(world: World, entity: Entity): { motion: Motion; frame: number } {
+  if (entity.path.length > 0) {
+    return { motion: 'walk', frame: Math.floor(entity.travelled / STRIDE_LENGTH) };
+  }
+
+  const action = currentAction(entity);
+  const cooldown = UNITS[entity.defId]?.combat?.attackCooldown ?? 0;
+
+  if (action === 'attack' && cooldown > 0) {
+    const progress = Math.min(0.999, Math.max(0, 1 - entity.attackCooldown / cooldown));
+    return { motion: 'strike', frame: Math.floor(progress * frameCount('strike')) };
+  }
+
+  if (action === 'gather' || action === 'build') {
+    return { motion: 'work', frame: freeRunning(world, entity, 1.1, frameCount('work')) };
+  }
+
+  return { motion: 'idle', frame: freeRunning(world, entity, 2.0, frameCount('idle')) };
+}
+
+/** Image d'un cycle libre, décalée par l'unité pour désynchroniser un groupe. */
+function freeRunning(world: World, entity: Entity, seconds: number, frames: number): number {
+  const offset = (entity.id * 0.37) % 1;
+  return Math.floor((((world.time / seconds + offset) % 1) + 1) % 1 * frames);
+}
+
 /** Épaisseur apparente du plateau, en pixels. */
 const MAP_THICKNESS = 10;
+
+/** Rayon du flou de la lisière du brouillard, en tuiles. */
+const FOG_BLUR = 2;
+
+/**
+ * Flou séparable sur un champ de valeurs, en place.
+ *
+ * Deux passes de moyenne glissante — une horizontale, une verticale — plutôt
+ * qu'un noyau à deux dimensions : le coût devient linéaire en rayon au lieu
+ * d'être quadratique. Sur 120 × 120 tuiles rafraîchies deux fois par seconde,
+ * ça ne se mesure pas.
+ */
+function blurField(
+  field: Float32Array,
+  scratch: Float32Array,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  const span = radius * 2 + 1;
+
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      let sum = 0;
+      for (let d = -radius; d <= radius; d++) {
+        // Les bords se prolongent d'eux-mêmes : hors carte, le brouillard vaut
+        // ce qu'il vaut sur la dernière tuile.
+        const sx = Math.min(width - 1, Math.max(0, x + d));
+        sum += field[row + sx] ?? 0;
+      }
+      scratch[row + x] = sum / span;
+    }
+  }
+
+  for (let x = 0; x < width; x++) {
+    for (let y = 0; y < height; y++) {
+      let sum = 0;
+      for (let d = -radius; d <= radius; d++) {
+        const sy = Math.min(height - 1, Math.max(0, y + d));
+        sum += scratch[sy * width + x] ?? 0;
+      }
+      field[y * width + x] = sum / span;
+    }
+  }
+}
 
 /**
  * Le losange jouable, en pixels écran, sous forme de polygone plat.

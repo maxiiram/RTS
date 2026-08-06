@@ -9,6 +9,7 @@
 
 import { BUILDING_IDS } from '../data/buildings.ts';
 import { UNIT_IDS } from '../data/units.ts';
+import { frameCount, type Motion } from './animation.ts';
 import type { Sprite } from './canvas.ts';
 import { drawBuilding, drawWall } from './buildings.ts';
 import { drawBerryBush, drawGroundPattern, drawOre, drawTree } from './nature.ts';
@@ -25,8 +26,24 @@ function cached(key: string, build: () => Sprite): Sprite {
   return created;
 }
 
-export function unitSprite(defId: string, kingdomColor: number): Sprite {
-  return cached(`unit:${defId}:${kingdomColor}`, () => drawUnit(defId, kingdomColor));
+/**
+ * Une image d'une unité.
+ *
+ * Chaque couple (mouvement, image) est un sprite entier, fabriqué à la
+ * demande puis gardé : le pixel art ne s'interpole pas, il se redessine. Le
+ * cache plafonne à quatorze images par unité et par royaume, soit quelques
+ * centaines de tampons de trois kilo-octets — négligeable, et calculé une
+ * seule fois par partie.
+ */
+export function unitSprite(
+  defId: string,
+  kingdomColor: number,
+  motion: Motion = 'idle',
+  frame = 0,
+): Sprite {
+  return cached(`unit:${defId}:${kingdomColor}:${motion}:${frame}`, () =>
+    drawUnit(defId, kingdomColor, motion, frame),
+  );
 }
 
 export function buildingSprite(defId: string, kingdomColor: number, site = false): Sprite {
@@ -98,6 +115,30 @@ export function catalogue(): CatalogueEntry[] {
   }
   for (const id of UNIT_IDS) {
     entries.push({ section: 'Unités — Rubis', name: id, sprite: unitSprite(id, rubis) });
+  }
+
+  // Bandes d'animation : chaque cycle en entier, image par image.
+  //
+  // C'est le seul moyen de juger une animation sans la jouer — une image ratée
+  // se voit d'un coup d'œil sur la bande, alors qu'elle passe inaperçue à cinq
+  // images par seconde dans une mêlée.
+  const strips: ReadonlyArray<{ id: string; motion: Motion }> = [
+    { id: 'soldat', motion: 'walk' },
+    { id: 'soldat', motion: 'strike' },
+    { id: 'bucheron', motion: 'work' },
+    { id: 'archer', motion: 'strike' },
+    { id: 'chevalier_lance', motion: 'strike' },
+    { id: 'chevalier', motion: 'walk' },
+  ];
+
+  for (const strip of strips) {
+    for (let frame = 0; frame < frameCount(strip.motion); frame++) {
+      entries.push({
+        section: `Animation — ${strip.id} ${strip.motion}`,
+        name: `${frame + 1}`,
+        sprite: unitSprite(strip.id, saphir, strip.motion, frame),
+      });
+    }
   }
 
   for (const id of BUILDING_IDS) {
