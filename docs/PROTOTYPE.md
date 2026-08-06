@@ -49,11 +49,22 @@ totale de l'adversaire, GDD §8).
   un tas de quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et à
   la mine — on pose un dépôt au bord d'une zone — et ce qui fait des zones du
   centre un enjeu territorial plutôt qu'un semis d'arbres isolés.
-- **Unités animées** : quatre cycles — repos, marche, coup d'arme, travail —
-  cadencés par ce que fait réellement l'unité et non par un compteur
-  décoratif. La foulée avance avec la distance parcourue, si bien que les pieds
-  ne patinent pas quand la vitesse change ; le coup d'arme suit le rechargement
-  d'attaque, si bien que l'image d'impact tombe sur le coup réellement porté.
+- **Unités animées sur un squelette** : quatre cycles — repos, marche à huit
+  images, coup d'arme, travail — décrits en angles d'articulation (cuisse,
+  genou, épaule, coude, arme) et non en décalages de pixels. La jambe se
+  raccourcit quand elle se plie, le corps monte et descend tout seul parce que
+  le pied le plus bas est posé au sol, et l'arme, accrochée au poing, tourne
+  avec lui.
+
+  Chaque cycle est cadencé par ce que fait réellement l'unité et non par un
+  compteur décoratif : la foulée avance avec la distance parcourue, si bien que
+  les pieds ne patinent pas quand la vitesse change ; le coup d'arme suit le
+  rechargement d'attaque, si bien que l'image d'impact tombe sur le coup
+  réellement porté.
+- **Quatre caps** : une unité regarde où elle va. Deux vues sont dessinées — de
+  face et de dos, la seconde sans visage — et les deux autres s'obtiennent en
+  retournant le sprite à l'affichage. À l'arrêt, l'unité garde le cap de son
+  dernier pas.
 - **Brouillard de guerre** : noir sur ce qui n'a jamais été exploré, voilé sur
   ce qui l'a été mais n'est plus observé. Sa lisière est floutée : à une
   opacité par tuile, la limite de l'exploré était un escalier de losanges
@@ -105,11 +116,11 @@ tables change immédiatement le jeu**, sans toucher à une ligne de code.
 
 Par ordre d'importance pour la suite :
 
-1. **Une seule direction.** Les unités s'animent (marche, coup d'arme, récolte,
-   construction — voir la [direction artistique](ART.md) §6) mais restent vues
-   de face quel que soit leur cap, y compris en marchant vers la gauche. Un RTS
-   isométrique en demande normalement huit — soit huit fois le travail,
-   animations comprises. C'est le plus gros manque visuel du jeu.
+1. **Quatre caps, pas huit.** Les unités regardent où elles vont (voir la
+   [direction artistique](ART.md) §6), mais une unité qui part vers l'est et
+   une autre vers le sud partagent la même vue de face. La grille isométrique
+   en demande huit ; les quatre manquantes seraient des trois-quarts, à
+   dessiner entièrement.
 2. **L'IA n'est pas soumise au brouillard.** Le joueur l'est, elle non : elle
    raisonne encore sur l'état complet de la carte. C'est le comportement
    d'Age of Empires 1, mais ça reste une inégalité à corriger.

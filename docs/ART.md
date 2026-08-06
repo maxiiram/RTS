@@ -249,22 +249,42 @@ distinguait plus le tracé.
 
 ## 6. L'animation
 
-Le pixel art ne s'interpole pas : il se redessine. Une animation, ici, est donc
-une **table de poses clés** (`src/art/animation.ts`) que le dessin lit au lieu
-de valeurs écrites en dur. Quatre nombres suffisent à couvrir tout le jeu,
-parce que toutes les figures partagent le même squelette :
+Le pixel art ne s'interpole pas : il se redessine. Mais il y a un **squelette**,
+et c'est lui qui fait la différence entre une figure qui gigote et une figure
+qui marche.
+
+Une pose (`src/art/animation.ts`) donne des **angles d'articulation**, pas des
+décalages de pixels : cuisse, genou, épaule, coude, arme. Le dessin les résout
+en positions, exactement comme un personnage articulé.
 
 | Champ | Effet |
 |---|---|
-| `stride` | Écarte les jambes, du pas avant (+1) au pas arrière (−1) |
-| `bob` | Monte ou descend le corps — le rebond de la marche |
-| `lean` | Penche le buste vers l'avant : le poids d'un coup |
-| `reach` | Sort l'arme, du repos (0) à l'extension complète (1) |
+| `hip`, `knee` | Cuisse et flexion du genou, par jambe |
+| `arm`, `elbow` | Épaule et flexion du coude, par bras |
+| `weapon` | Angle de l'arme autour du poing |
+| `bob`, `shoulder`, `lean` | Respiration, contre-rotation, poids du buste |
 
-Quatre cycles, de deux à quatre images : **repos**, **marche**, **coup
-d'arme**, **travail**. Les deux dernières images d'un cycle de marche ne sont
-jamais la copie l'une de l'autre — elles gardent un reste de foulée en sens
-opposé, sans quoi quatre images se lisent comme deux.
+Quatre cycles : **repos** (4 images), **marche** (8), **coup d'arme** (5),
+**travail** (5). Chacun en deux vues, de face et de dos.
+
+### Ce que le squelette donne gratuitement
+
+**La jambe se raccourcit quand elle se plie.** Un genou à 45° remonte le pied
+de deux pixels : c'est ce qui lui fait passer le sol au lieu de le traverser.
+Aucun réglage à la main ne produit ça de façon fiable.
+
+**Le corps monte et descend tout seul.** On ne règle aucun rebond : la figure
+est posée de façon que le pied le plus bas touche exactement le sol, et le
+bassin se trouve là où la géométrie l'exige. Une jambe tendue porte le corps
+plus haut qu'une jambe pliée — le rebond de la marche en découle, il ne
+s'invente pas.
+
+**L'arme suit la main.** Elle est décrite dans un repère accroché au poing et
+tourne avec lui, échantillonnée au demi-pixel pour qu'une rotation quelconque
+ne laisse pas de trous. Elle ne peut donc pas se désynchroniser du bras, et
+toutes les positions intermédiaires viennent sans travail supplémentaire. Cela
+a remplacé trois positions d'arme dessinées à la main, qui coûtaient plus cher
+et se lisaient moins bien.
 
 ### Ce qui cadence chaque cycle
 
@@ -275,34 +295,64 @@ figure qui s'agite et une figure qui travaille :
   patinent pas quand la vitesse change — un cavalier va deux fois plus vite
   qu'un fantassin, sa foulée aussi.
 - Le **coup d'arme** suit le rechargement d'attaque, si bien que l'image
-  d'impact tombe sur le coup réellement porté et non à côté.
+  d'impact tombe sur le coup réellement porté.
 - **Récolte et construction** tournent sur l'horloge de simulation, décalées
   par l'identifiant de l'unité, pour qu'un chantier de six paysans ne
   ressemble pas à un ballet synchronisé.
 
+### Les quatre caps
+
+Une unité qui traverse la carte en fixant le joueur, c'est le défaut qui se
+remarque avant tous les autres : on pardonne une foulée approximative, pas un
+homme qui marche de côté sans tourner la tête.
+
+**Deux vues dessinées, quatre caps affichés.** De face et de dos ; les deux
+autres s'obtiennent en retournant le sprite à l'affichage, ce qui ne coûte rien
+et divise par deux le nombre de textures. Le signe de `dx + dy` dit si l'unité
+vient vers le joueur ou s'en éloigne, celui de `dx − dy` de quel côté de
+l'écran elle va. À l'arrêt, elle garde le cap de son dernier pas : une figure
+qui pivote vers le joueur dès qu'elle s'immobilise donne le pire des deux
+mondes.
+
+> **Écart assumé.** Le retournement inverse la lumière, qui vient partout
+> ailleurs du nord-ouest. C'est accepté : sur une figure de trente pixels en
+> mouvement, un éclairage inversé ne se voit pas, une unité qui glisse de côté
+> se voit tout de suite.
+
+De dos, ce n'est pas la même figure retournée : pas de visage mais une nuque,
+un heaume lisse sans fente, un chaperon qui couvre toute la tête, le carquois
+au milieu du dos, des bretelles de tablier croisées, une dossière sanglée en
+croix — et pas d'écu, qu'un corps cacherait entièrement.
+
 ### Trois pièges
 
-**De face, l'écartement des jambes ne dit pas laquelle mène.** Les deux moitiés
-du cycle se ressembleraient trait pour trait. C'est la profondeur qui les
-sépare : la jambe qui avance est éclairée et posée à plat, celle qui suit est
-dans l'ombre et décolle du sol.
+**Le bassin a une largeur.** Sans elle, les deux jambes partaient du même point
+et la plus lointaine disparaissait derrière l'autre dès que la pose était
+symétrique : la figure semblait n'avoir qu'une jambe dans toutes les images
+sauf celles de la marche.
 
 **Le gabarit est fixé par le geste, pas par la silhouette au repos.** Une épée
 abattue vers l'avant sort de six pixels de la figure immobile ; sur une toile
-juste à la taille du corps, elle était simplement rognée et l'unité frappait
-avec un moignon. Les fantassins sont donc dessinés dans 30 × 34 pour un corps
-qui en occupe 20.
+juste à la taille du corps, elle était rognée et l'unité frappait avec un
+moignon.
 
-**L'outil du paysan est la seule pièce qui tourne vraiment.** Un outil se
-reconnaît à sa forme, pas à son orientation — le redessiner à la main pour
-chaque angle serait trois fois le travail pour le même résultat. Il pivote donc
-autour du poing, échantillonné au demi-pixel pour qu'une rotation quelconque ne
-laisse pas de trous. Les armes, elles, ont trois positions franches dessinées à
-la main : à cette taille, elles se lisent mieux ainsi qu'en tournant.
+**Une hampe ne suit pas la course d'une lame.** Passé l'horizontale, la lance se
+plantait dans le sol à travers les jambes. Sa rotation est bornée : c'est une
+arme d'estoc, elle pointe, elle ne taille pas. L'arc, lui, ne tourne pas du
+tout — il est tenu à bout de bras, et c'est la corde et la flèche qui font le
+geste.
+
+### Ce que ça coûte
+
+Chaque couple (unité, mouvement, image, vue) est un sprite entier : le pixel
+art ne s'interpole pas. Le catalogue complet — douze unités, deux royaumes,
+quatre cycles, deux vues — fait **1 056 images, 5,3 Mo, 142 ms** à fabriquer.
+Et il n'est jamais fabriqué en entier : chaque image est peinte à la première
+demande puis gardée, si bien qu'une partie n'en construit qu'une fraction.
 
 Les bandes d'animation de `docs/sprites.png` montrent chaque cycle image par
 image. C'est le seul moyen de juger une animation sans la jouer : une image
-ratée y saute aux yeux, alors qu'elle passe inaperçue à cinq images par seconde
+ratée y saute aux yeux, alors qu'elle passe inaperçue à dix images par seconde
 au milieu d'une mêlée.
 
 ---
@@ -333,7 +383,7 @@ damier. Les losanges qui dépassent du pavé rentrent par le côté opposé.
 src/art/
   palette.ts    La palette — source de vérité des couleurs
   canvas.ts     Toile de pixels et primitives de dessin
-  animation.ts  Les poses clés des quatre cycles
+  animation.ts  Le squelette : angles d'articulation des quatre cycles
   units.ts      Les douze unités
   buildings.ts  Les bâtiments et les murailles
   nature.ts     Sol, arbres, buissons, filons
@@ -367,10 +417,10 @@ code. Un sprite se corrige donc en changeant deux nombres, pas en rouvrant un
 Cette passe fige le style et couvre tout le jeu. Manquent encore, par ordre
 d'importance :
 
-1. **Les directions.** Une unité est vue de face quel que soit son cap, y
-   compris quand elle marche vers la gauche. Un RTS isométrique en demande
-   normalement huit — soit huit fois le travail, animations comprises. C'est
-   désormais le plus gros manque visuel du jeu.
+1. **Quatre caps, pas huit.** Une unité qui se déplace vers l'est et une autre
+   vers le sud partagent la même vue de face. La grille isométrique en demande
+   huit ; les quatre manquantes seraient des trois-quarts, à dessiner
+   entièrement — le corps tourné, une épaule en avant.
 2. **Le décor est figé.** Les unités s'animent, pas les arbres ni les
    bannières. Un balancement de feuillage et un drapeau qui claque coûteraient
    peu et rendraient la carte vivante.

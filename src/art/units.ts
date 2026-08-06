@@ -22,13 +22,21 @@
  *
  * === L'anatomie ===
  *
- * Toutes les figures sont bâties sur le même squelette, en proportions
- * héroïques — une tête pour quatre, plutôt que pour sept. C'est ce qui rend
- * un visage lisible à cette taille sans donner un personnage difforme.
+ * Toutes les figures sont bâties sur le même squelette articulé, en
+ * proportions héroïques — une tête pour quatre, plutôt que pour sept. C'est ce
+ * qui rend un visage lisible à cette taille sans donner un personnage
+ * difforme.
  *
- * Trois repères verticaux suffisent à tout accrocher : le sol, la taille
- * (`waistY`) et les épaules (`shoulderY`). Le reste — cou, tête, bras, arme,
- * bouclier — se déduit de ces trois nombres, à pied comme à cheval.
+ * Les membres ne sont pas des rectangles qu'on déplace : ce sont des chaînes
+ * d'articulations que `animation.ts` donne en angles et que le dessin résout
+ * en positions. Une cuisse, un tibia, un pied ; un bras, un avant-bras, une
+ * main. L'arme est accrochée à la main et tourne avec elle.
+ *
+ * **Le bassin n'est jamais posé à la main.** On calcule les deux pieds à
+ * partir des angles, puis on descend la figure jusqu'à ce que le pied le plus
+ * bas touche exactement le sol. Le rebond de la marche en découle : une jambe
+ * tendue porte le corps plus haut qu'une jambe pliée. Réglé à la main, ce
+ * rebond ne tombe jamais juste ; calculé, il ne peut pas être faux.
  *
  * Et une règle qui vaut pour toutes les figures du jeu : **les membres du côté
  * opposé sont toujours plus sombres et légèrement décalés**. C'est ce décalage,
@@ -38,7 +46,7 @@
 
 import type { UnitDef } from '../data/types.ts';
 import { UNITS } from '../data/units.ts';
-import { type Motion, type Pose, poseOf } from './animation.ts';
+import { type Motion, type Pose, poseOf, type View } from './animation.ts';
 import { PixelCanvas, type Sprite } from './canvas.ts';
 import { kingdomShades, PALETTE, shade } from './palette.ts';
 
@@ -130,6 +138,7 @@ export function drawUnit(
   kingdomColor: number,
   motion: Motion = 'idle',
   frame = 0,
+  view: View = 'front',
 ): Sprite {
   const def = UNITS[defId];
   const mounted = def?.class === 'cavalry';
@@ -146,11 +155,11 @@ export function drawUnit(
   canvas.shadow(cx, groundY, mounted ? 12 : 6, mounted ? 4 : 3, PALETTE.shadow);
 
   if (mounted) {
-    drawHorse(canvas, cx + HORSE_OFFSET, groundY, pose);
+    drawHorse(canvas, cx + HORSE_OFFSET, groundY, pose, view);
     // Le cavalier suit sa monture : le galop soulève l'assiette d'un pixel.
-    drawRider(canvas, cx + RIDER_OFFSET, groundY - 21 + pose.bob, team, kit, pose);
+    drawRider(canvas, cx + RIDER_OFFSET, groundY - 21 + pose.bob, team, kit, pose, view);
   } else {
-    drawFootSoldier(canvas, cx, groundY, team, kit, pose);
+    drawFootSoldier(canvas, cx, groundY, team, kit, pose, view);
   }
 
   canvas.outline(PALETTE.outline);
@@ -158,16 +167,88 @@ export function drawUnit(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Le squelette
+// ───────────────────────────────────────────────────────────────────────────
+
+interface Joint {
+  x: number;
+  y: number;
+}
+
+/** Degrés → radians, une fois pour toutes. */
+const RAD = Math.PI / 180;
+
+/**
+ * Extrémité d'un segment partant de `from` à l'angle `deg`.
+ *
+ * 0° pointe vers le bas, les degrés positifs vers l'avant de la figure — la
+ * gauche de l'écran. C'est la convention de `animation.ts`, et elle vaut pour
+ * les jambes comme pour les bras.
+ */
+function tip(from: Joint, deg: number, length: number): Joint {
+  return {
+    x: from.x - Math.sin(deg * RAD) * length,
+    y: from.y + Math.cos(deg * RAD) * length,
+  };
+}
+
+/**
+ * Chaîne à deux segments : membre supérieur, articulation, membre inférieur.
+ *
+ * Le genou et le coude ne plient que dans un sens — le segment inférieur part
+ * donc toujours de l'angle du supérieur **moins** la flexion.
+ */
+function limbChain(
+  root: Joint,
+  upperDeg: number,
+  flexDeg: number,
+  upper: number,
+  lower: number,
+): { joint: Joint; end: Joint } {
+  const joint = tip(root, upperDeg, upper);
+  return { joint, end: tip(joint, upperDeg - flexDeg, lower) };
+}
+
+/**
+ * Segment de membre, épais de `width` pixels.
+ *
+ * Les membres sont proches de la verticale : les épaissir horizontalement
+ * suffit, et c'est bien plus net qu'un vrai tracé à épaisseur constante, qui
+ * baverait d'un pixel de chaque côté à chaque changement de pente.
+ */
+function bone(
+  canvas: PixelCanvas,
+  from: Joint,
+  to: Joint,
+  width: number,
+  color: number,
+  edge?: number,
+): void {
+  for (let i = 0; i < width; i++) {
+    const dx = i - Math.floor((width - 1) / 2);
+    canvas.line(from.x + dx, from.y, to.x + dx, to.y, i === 0 && edge !== undefined ? edge : color);
+  }
+  // Les extrémités d'un tracé de Bresenham laissent un pixel manquant dès que
+  // la pente change : on rebouche l'articulation.
+  canvas.rect(to.x - Math.floor((width - 1) / 2), to.y - 1, width, 2, color);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // La figure à pied
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * Ordre de pose : ce qui est derrière d'abord.
+ * La figure à pied, montée sur son squelette.
  *
- * Bras arrière → jambes → carquois → buste → tête → arme → bras avant →
- * bouclier. Chaque couche mord d'un ou deux pixels sur la précédente, et c'est
- * ce recouvrement qui donne l'épaisseur — sans lui, la figure se lit comme un
- * assemblage de pièces découpées et posées côte à côte.
+ * Trois étapes, dans cet ordre : on résout les jambes pour trouver la hauteur
+ * du bassin, on résout les bras à partir des épaules, puis on peint de
+ * l'arrière vers l'avant.
+ *
+ * L'ordre de pose compte autant que le dessin : membres lointains → jambe
+ * proche → carquois → buste → tête → arme → bras proche → écu. Chaque couche
+ * mord d'un ou deux pixels sur la précédente, et c'est ce recouvrement qui
+ * donne l'épaisseur — sans lui, la figure se lit comme un assemblage de pièces
+ * découpées et posées côte à côte.
  */
 function drawFootSoldier(
   canvas: PixelCanvas,
@@ -176,113 +257,152 @@ function drawFootSoldier(
   team: Team,
   kit: Kit,
   pose: Pose,
+  view: View,
 ): void {
-  // Les pieds restent au sol, le reste du corps monte et descend : c'est le
-  // rebond qui fait la marche. Les jambes s'étirent et se tassent d'autant.
-  const waistY = groundY - 9 + pose.bob;
-  const shoulderY = waistY - 10;
-  // Le buste penche en avant sans que les hanches suivent — au-delà de deux ou
-  // trois pixels, la figure se casse en deux.
-  const chestX = cx + Math.round(pose.lean * 0.5);
+  const THIGH = 5;
+  const SHIN = 5;
+  const UPPER_ARM = 5;
+  const FOREARM = 4;
+
+  // ── 1. Les jambes décident de la hauteur du bassin ──────────────────────
+  //
+  // On résout la chaîne depuis un bassin fictif, on regarde où tombent les
+  // deux pieds, et on descend toute la figure pour que le plus bas touche
+  // exactement le sol. Le rebond de la marche sort de là : jambe tendue, corps
+  // haut ; jambe pliée, corps bas. Aucun réglage à la main ne tombe aussi
+  // juste.
+  // Le bassin a une largeur : quatre pixels entre les deux hanches. Sans elle,
+  // les deux jambes partaient du même point et la plus lointaine disparaissait
+  // derrière l'autre dès que la pose était symétrique — la figure semblait
+  // n'avoir qu'une jambe dans toutes les images sauf celles de la marche.
+  const draftY = groundY - THIGH - SHIN;
+  const roots: Joint[] = [
+    { x: cx - 2, y: draftY },
+    { x: cx + 2, y: draftY },
+  ];
+  const draftLegs = [0, 1].map((side) =>
+    limbChain(roots[side] as Joint, pose.hip[side] ?? 0, pose.knee[side] ?? 0, THIGH, SHIN),
+  );
+  const lowest = Math.max(...draftLegs.map((leg) => leg.end.y));
+  const rise = groundY - lowest + pose.bob;
+
+  const hips: Joint[] = roots.map((root) => ({ x: root.x, y: root.y + rise }));
+  const legs = [0, 1].map((side) =>
+    limbChain(hips[side] as Joint, pose.hip[side] ?? 0, pose.knee[side] ?? 0, THIGH, SHIN),
+  );
+  const hipY = draftY + rise;
+  const shoulderY = hipY - 11;
+  // Le buste penche en avant et tourne à l'inverse du bassin.
+  const chestX = cx + Math.round(pose.lean * 0.5 + pose.shoulder);
+  const waistY = hipY - 1;
+
+  // ── 2. Les bras, accrochés aux épaules ──────────────────────────────────
+  const shoulders: Joint[] = [
+    { x: chestX + 4, y: shoulderY + 2 },
+    { x: chestX - 4, y: shoulderY + 2 },
+  ];
+  const arms = [0, 1].map((side) =>
+    limbChain(
+      shoulders[side] as Joint,
+      pose.arm[side] ?? 0,
+      pose.elbow[side] ?? 0,
+      UPPER_ARM,
+      FOREARM,
+    ),
+  );
 
   const sleeve = kit.heavy ? PALETTE.steel : team.main;
   const sleeveDark = kit.heavy ? PALETTE.steelDark : team.dark;
 
-  // Le bras arrière balance à l'opposé des jambes : c'est ce contrepoint qui
-  // distingue une marche d'un glissement.
-  const swing = Math.round(-pose.stride * 2);
+  // ── 3. Peinture, de l'arrière vers l'avant ──────────────────────────────
+  const far = legs[1] as { joint: Joint; end: Joint };
+  const near = legs[0] as { joint: Joint; end: Joint };
+  const farArm = arms[1] as { joint: Joint; end: Joint };
+  const nearArm = arms[0] as { joint: Joint; end: Joint };
 
-  // Bras arrière : même dessin que l'avant, une valeur plus bas et décalé
-  // d'un pixel vers l'intérieur. C'est tout ce qu'il faut pour que le buste
-  // ait deux côtés.
-  drawArm(canvas, chestX + 4 + swing, shoulderY + 1, sleeveDark, PALETTE.skinDark);
+  drawLeg(canvas, hips[1] as Joint, far, kit, false);
+  drawArm(canvas, shoulders[1] as Joint, farArm, sleeveDark, PALETTE.skinDark);
+  drawLeg(canvas, hips[0] as Joint, near, kit, true);
 
-  drawLegs(canvas, cx, groundY, waistY, kit, pose);
-  if (kit.ranged) drawQuiver(canvas, chestX - 9, shoulderY + 3);
+  // L'écu et le carquois se portent dans le dos : vus de derrière, ils passent
+  // devant le corps, et non l'inverse.
+  if (view === 'back') {
+    if (kit.ranged) drawQuiver(canvas, chestX - 3, shoulderY + 1);
+  } else if (kit.ranged) {
+    drawQuiver(canvas, chestX - 9, shoulderY + 3);
+  }
 
-  drawTorso(canvas, chestX, shoulderY, waistY, team, kit);
-  drawHead(canvas, chestX, shoulderY - 8, team, kit);
+  drawTorso(canvas, chestX, shoulderY, waistY, team, kit, view);
+  drawHead(canvas, chestX, shoulderY - 8, team, kit, view);
 
-  // Bras avant, celui qui tient l'arme : il suit le geste, pas la marche.
-  const handY = shoulderY + 9;
-  const reach = Math.round(pose.reach * 3);
-  drawArm(canvas, chestX + 5 + Math.max(0, reach), shoulderY + 2 - swing, sleeve, PALETTE.skin);
+  // L'arme est accrochée au poing et tourne avec lui : c'est le même point
+  // pour l'épée, la hampe, l'outil et l'arc.
+  const fist = nearArm.end;
+  // L'arc fait exception : il est tenu à bout de bras et ne bouge pas. C'est la
+  // corde et la flèche qui font le geste — accroché au poing qui tire, il
+  // partait en tous sens à chaque image.
+  if (kit.ranged) drawBow(canvas, chestX + 7, shoulderY + 7, pose);
+  else if (kit.polearm) drawSpear(canvas, fist, pose);
+  else if (kit.worker) drawTool(canvas, fist, kit.tool, pose);
+  else drawSword(canvas, fist, kit.heavy, pose);
 
-  // Le poing avance avec le geste mais ne recule presque pas : un armement qui
-  // ramène la main dans le buste y enfonce aussi l'arme.
-  const handX = chestX + 5 + Math.max(-1, reach);
-  if (kit.ranged) drawBow(canvas, chestX + 7, shoulderY + 6, pose);
-  else if (kit.polearm) drawSpear(canvas, handX + 1, shoulderY - 10, handY + 4, pose);
-  else if (kit.worker) drawTool(canvas, handX, handY, kit.tool, pose);
-  // La garde de l'épée est remontée de deux rangs : à hauteur de ceinture,
-  // les deux ors s'alignaient et formaient une barre en travers de la figure.
-  else drawSword(canvas, handX, handY - 3, kit.heavy, pose);
+  drawArm(canvas, shoulders[0] as Joint, nearArm, sleeve, PALETTE.skin);
 
-  // Bouclier : porté à l'avant-bras gauche, il masque un tiers du buste.
-  // C'est ce qui rend un fantassin lisible de loin, bien avant son arme.
-  if (!kit.worker && !kit.ranged) {
-    drawShield(canvas, chestX - 9, shoulderY + 2, team, kit.heavy);
+  // Écu : porté à l'avant-bras lointain, il masque un tiers du buste. C'est ce
+  // qui rend un fantassin lisible de loin, bien avant son arme.
+  if (!kit.worker && !kit.ranged && view === 'front') {
+    drawShield(canvas, farArm.joint.x - 5, farArm.joint.y - 1, team, kit.heavy);
   }
 }
 
 /**
- * Jambes en appui décalé.
+ * Une jambe : cuisse, tibia, botte.
  *
- * Deux jambes parallèles donnent un mannequin. Un pas d'un pixel entre les
- * deux, la jambe arrière plus sombre, et la figure a un poids.
- *
- * En marche, `stride` les écarte et les rapproche pendant que le bassin
- * (`waistY`) monte et descend : la cuisse s'étire au contact, se tasse à la
- * suspension. C'est ce couplage qui fait qu'un cycle de jambes ressemble à
- * une marche et non à des ciseaux.
+ * La jambe proche est éclairée et plus large d'un pixel, la lointaine plus
+ * sombre. C'est ce seul écart de valeur qui empêche les deux de se lire comme
+ * une masse unique quand elles se croisent.
  */
-function drawLegs(
+function drawLeg(
   canvas: PixelCanvas,
-  cx: number,
-  groundY: number,
-  waistY: number,
+  hip: Joint,
+  leg: { joint: Joint; end: Joint },
   kit: Kit,
-  pose: Pose,
+  near: boolean,
 ): void {
   // Chausses assez sombres pour ne pas se confondre avec la peau : à cette
   // taille, deux valeurs voisines sur un membre et un visage donnent une
   // figure nue.
-  const hose = kit.heavy ? PALETTE.steel : shade(PALETTE.clothDark, 0.78);
-  const hoseDark = kit.heavy ? PALETTE.steelDark : shade(PALETTE.clothDark, 0.6);
-  const boot = PALETTE.woodDark;
-  const bootDark = shade(PALETTE.woodDark, 0.75);
+  const hose = kit.heavy
+    ? near
+      ? PALETTE.steel
+      : PALETTE.steelDark
+    : shade(PALETTE.clothDark, near ? 0.78 : 0.58);
+  const boot = near ? PALETTE.woodDark : shade(PALETTE.woodDark, 0.75);
 
-  // La foulée **écarte** les jambes : celle de gauche part à gauche, celle de
-  // droite à droite. Les rapprocher toutes les deux du centre les superposait,
-  // et la figure semblait n'avoir plus qu'une jambe.
-  const spread = Math.round(Math.abs(pose.stride) * 2);
-  const length = groundY - waistY;
+  bone(canvas, hip, leg.joint, near ? 4 : 3, hose);
+  bone(canvas, leg.joint, leg.end, near ? 3 : 3, hose);
 
-  // De face, l'écartement ne dit pas *quelle* jambe mène : les deux moitiés du
-  // cycle se ressembleraient trait pour trait. C'est la profondeur qui les
-  // sépare — la jambe qui avance est éclairée et posée à plat, celle qui suit
-  // est dans l'ombre et décolle du sol.
-  const leftLeads = pose.stride >= 0;
-  const lifted = pose.stride !== 0 && Math.abs(pose.stride) < 0.8 ? 1 : 0;
-
-  const leg = (x: number, width: number, leads: boolean): void => {
-    const lift = leads ? 0 : lifted;
-    canvas.rect(x, waistY, width, length - 1 - lift, leads ? hose : hoseDark);
-    canvas.rect(x - 1, groundY - 2 - lift, width + 1, 2, leads ? boot : bootDark);
-    canvas.rect(x - 1, groundY - 2 - lift, width + 1, 1, leads ? PALETTE.wood : boot);
-    if (kit.heavy) {
-      canvas.rect(x, groundY - 6 - lift, width, 1, leads ? PALETTE.steelLight : PALETTE.steel);
-    }
-  };
-
-  // Celle qui suit d'abord, pour que celle qui mène passe devant.
-  if (leftLeads) {
-    leg(cx + 2 + spread, 3, false);
-    leg(cx - 4 - spread, 4, true);
-  } else {
-    leg(cx - 4 - spread, 4, false);
-    leg(cx + 2 + spread, 3, true);
+  // Genouillère : le détail qui distingue une jambe harnachée d'une chausse.
+  if (kit.heavy) {
+    canvas.rect(leg.joint.x - 1, leg.joint.y - 1, 3, 1, near ? PALETTE.steelLight : PALETTE.steel);
   }
+
+  // Le pied se pose à plat : il pointe vers l'avant de la figure.
+  canvas.rect(leg.end.x - 2, leg.end.y - 1, 5, 2, boot);
+  if (near) canvas.rect(leg.end.x - 2, leg.end.y - 1, 5, 1, PALETTE.wood);
+}
+
+/** Un bras : épaule, avant-bras plus fin, main. */
+function drawArm(
+  canvas: PixelCanvas,
+  shoulder: Joint,
+  arm: { joint: Joint; end: Joint },
+  sleeve: number,
+  skin: number,
+): void {
+  bone(canvas, shoulder, arm.joint, 3, sleeve, shade(sleeve, 1.15));
+  bone(canvas, arm.joint, arm.end, 2, sleeve);
+  canvas.rect(arm.end.x - 1, arm.end.y - 1, 2, 2, skin);
 }
 
 /**
@@ -299,8 +419,10 @@ function drawTorso(
   waistY: number,
   team: Team,
   kit: Kit,
+  view: View,
 ): void {
   const height = waistY - shoulderY;
+  const back = view === 'back';
 
   canvas.rect(cx - 5, shoulderY, 11, 3, team.main);
   canvas.rect(cx - 4, shoulderY + 3, 9, height - 3, team.main);
@@ -313,10 +435,16 @@ function drawTorso(
 
   if (kit.heavy) {
     // Plastron bombé : trois valeurs et une arête verticale au milieu, ce qui
-    // le fait lire comme une coquille et non comme une plaque.
+    // le fait lire comme une coquille et non comme une plaque. De dos, c'est
+    // une dossière : même plaque, mais lisse et sanglée en croix.
     canvas.rect(cx - 4, shoulderY + 1, 9, 6, PALETTE.steel);
     canvas.rect(cx - 4, shoulderY + 1, 9, 1, PALETTE.steelLight);
-    canvas.vLine(cx - 1, shoulderY + 2, 5, PALETTE.steelLight);
+    if (back) {
+      canvas.line(cx - 4, shoulderY + 2, cx + 4, shoulderY + 6, PALETTE.steelDark);
+      canvas.line(cx + 4, shoulderY + 2, cx - 4, shoulderY + 6, PALETTE.steelDark);
+    } else {
+      canvas.vLine(cx - 1, shoulderY + 2, 5, PALETTE.steelLight);
+    }
     canvas.rect(cx + 3, shoulderY + 2, 2, 5, PALETTE.steelDark);
     // Spallières débordantes : la silhouette s'élargit aux épaules, signe le
     // plus rapide d'une unité lourde.
@@ -325,13 +453,19 @@ function drawTorso(
     canvas.rect(cx + 4, shoulderY, 3, 3, PALETTE.steelDark);
     canvas.rect(cx + 4, shoulderY, 3, 1, PALETTE.steel);
   } else if (kit.worker) {
-    // Tablier de cuir, noué haut : la tenue de travail se voit avant l'outil.
-    canvas.rect(cx - 3, shoulderY + 4, 7, height - 4, PALETTE.wood);
-    canvas.rect(cx - 3, shoulderY + 4, 7, 1, PALETTE.woodLight);
-    canvas.rect(cx + 2, shoulderY + 5, 2, height - 5, PALETTE.woodDark);
-    // Bretelles
-    canvas.vLine(cx - 2, shoulderY + 1, 3, PALETTE.wood);
-    canvas.vLine(cx + 2, shoulderY + 1, 3, PALETTE.woodDark);
+    if (back) {
+      // De dos, on ne voit du tablier que ses bretelles croisées.
+      canvas.line(cx - 3, shoulderY + 1, cx + 3, shoulderY + 6, PALETTE.wood);
+      canvas.line(cx + 3, shoulderY + 1, cx - 3, shoulderY + 6, PALETTE.woodDark);
+    } else {
+      // Tablier de cuir, noué haut : la tenue de travail se voit avant l'outil.
+      canvas.rect(cx - 3, shoulderY + 4, 7, height - 4, PALETTE.wood);
+      canvas.rect(cx - 3, shoulderY + 4, 7, 1, PALETTE.woodLight);
+      canvas.rect(cx + 2, shoulderY + 5, 2, height - 5, PALETTE.woodDark);
+      // Bretelles
+      canvas.vLine(cx - 2, shoulderY + 1, 3, PALETTE.wood);
+      canvas.vLine(cx + 2, shoulderY + 1, 3, PALETTE.woodDark);
+    }
   } else {
     // Brigandine : les rivets sont les seuls pixels clairs du buste, posés en
     // quinconce. Un aplat de tunique ne se lit pas comme une protection.
@@ -355,7 +489,8 @@ function drawTorso(
   if (!kit.mounted) {
     canvas.rect(cx - 5, waistY - 2, 10, 2, shade(PALETTE.woodDark, 0.7));
     canvas.rect(cx - 5, waistY - 2, 10, 1, PALETTE.woodDark);
-    canvas.rect(cx - 1, waistY - 2, 2, 1, PALETTE.gold);
+    // La boucle est devant. De dos, on ne voit que la sangle.
+    if (!back) canvas.rect(cx - 1, waistY - 2, 2, 1, PALETTE.gold);
   }
 }
 
@@ -366,7 +501,16 @@ function drawTorso(
  * suivants et le cou raccorde aux épaules. Deux pixels d'œil suffisent à
  * orienter un regard — trois en font un masque.
  */
-function drawHead(canvas: PixelCanvas, cx: number, topY: number, team: Team, kit: Kit): void {
+function drawHead(
+  canvas: PixelCanvas,
+  cx: number,
+  topY: number,
+  team: Team,
+  kit: Kit,
+  view: View,
+): void {
+  const back = view === 'back';
+
   // Cou : sans lui la tête est posée sur les épaules comme une bille.
   canvas.rect(cx - 2, topY + 6, 4, 3, PALETTE.skinDark);
   canvas.rect(cx - 2, topY + 6, 3, 1, PALETTE.skin);
@@ -374,8 +518,18 @@ function drawHead(canvas: PixelCanvas, cx: number, topY: number, team: Team, kit
   canvas.rect(cx - 3, topY + 1, 6, 6, PALETTE.skin);
   canvas.rect(cx + 2, topY + 1, 1, 6, PALETTE.skinDark);
   canvas.rect(cx - 3, topY + 6, 6, 1, PALETTE.skinDark);
-  canvas.set(cx - 2, topY + 4, PALETTE.outline);
-  canvas.set(cx + 1, topY + 4, PALETTE.outline);
+
+  if (back) {
+    // De dos, pas de visage : une nuque et des cheveux. C'est le signe le plus
+    // fort de la direction — bien avant la position de l'arme, c'est l'absence
+    // de regard qui dit qu'une unité s'éloigne.
+    canvas.rect(cx - 3, topY + 1, 6, 4, PALETTE.woodDark);
+    canvas.rect(cx - 3, topY + 1, 6, 1, PALETTE.wood);
+    canvas.rect(cx - 2, topY + 5, 4, 1, PALETTE.woodDark);
+  } else {
+    canvas.set(cx - 2, topY + 4, PALETTE.outline);
+    canvas.set(cx + 1, topY + 4, PALETTE.outline);
+  }
 
   if (kit.heavy) {
     // Heaume fermé : plus aucun visage, une fente et deux trous d'aération.
@@ -384,9 +538,17 @@ function drawHead(canvas: PixelCanvas, cx: number, topY: number, team: Team, kit
     canvas.rect(cx - 4, topY, 8, 8, PALETTE.steel);
     canvas.rect(cx - 4, topY, 8, 2, PALETTE.steelLight);
     canvas.rect(cx + 2, topY + 1, 2, 7, PALETTE.steelDark);
-    canvas.rect(cx - 4, topY + 3, 8, 1, PALETTE.outline);
-    canvas.set(cx - 2, topY + 6, PALETTE.outline);
-    canvas.set(cx + 1, topY + 6, PALETTE.outline);
+    if (back) {
+      // De dos, le heaume est lisse : ni fente ni trous, juste la nuque du
+      // timbre et son bord rivé.
+      canvas.rect(cx - 4, topY + 6, 8, 1, PALETTE.steelDark);
+      canvas.set(cx - 3, topY + 4, PALETTE.steelLight);
+      canvas.set(cx + 2, topY + 4, PALETTE.steelLight);
+    } else {
+      canvas.rect(cx - 4, topY + 3, 8, 1, PALETTE.outline);
+      canvas.set(cx - 2, topY + 6, PALETTE.outline);
+      canvas.set(cx + 1, topY + 6, PALETTE.outline);
+    }
     // Cimier aux couleurs du royaume : le seul endroit où l'appartenance
     // survit à une armure entièrement d'acier.
     canvas.rect(cx - 1, topY - 3, 3, 3, team.main);
@@ -404,6 +566,8 @@ function drawHead(canvas: PixelCanvas, cx: number, topY: number, team: Team, kit
     canvas.rect(cx - 5, topY + 1, 6, 1, PALETTE.thatchLight);
     canvas.set(cx - 4, topY + 2, PALETTE.woodDark);
     canvas.set(cx + 3, topY + 2, PALETTE.woodDark);
+    // Vu de derrière, le bord du chapeau cache toute la nuque.
+    if (back) canvas.rect(cx - 4, topY + 2, 8, 2, PALETTE.thatchDark);
     return;
   }
 
@@ -415,8 +579,10 @@ function drawHead(canvas: PixelCanvas, cx: number, topY: number, team: Team, kit
     canvas.rect(cx - 4, topY, 8, 1, team.light);
     canvas.rect(cx + 2, topY, 2, 3, team.dark);
     // Le pan qui retombe dans la nuque, court : au-delà de trois rangs il se
-    // lit comme une chevelure et non comme une étoffe.
-    canvas.rect(cx + 3, topY + 3, 2, 3, team.dark);
+    // lit comme une chevelure et non comme une étoffe. De dos, c'est lui qu'on
+    // voit, et il couvre toute la tête.
+    if (back) canvas.rect(cx - 4, topY + 3, 8, 4, team.dark);
+    else canvas.rect(cx + 3, topY + 3, 2, 3, team.dark);
     return;
   }
 
@@ -426,134 +592,109 @@ function drawHead(canvas: PixelCanvas, cx: number, topY: number, team: Team, kit
   canvas.rect(cx - 4, topY, 8, 1, PALETTE.steelLight);
   canvas.rect(cx + 2, topY, 2, 3, PALETTE.steelDark);
   canvas.rect(cx - 4, topY + 2, 8, 1, PALETTE.steelDark);
-  canvas.vLine(cx, topY + 3, 3, PALETTE.steel);
-  // Camail : deux pixels de mailles de chaque côté de la mâchoire.
+  // Le nasal protège le nez : il n'existe qu'en vue de face.
+  if (!back) canvas.vLine(cx, topY + 3, 3, PALETTE.steel);
+  // Camail : deux pixels de mailles de chaque côté de la mâchoire, et toute la
+  // nuque quand on voit le fantassin de derrière.
   canvas.vLine(cx - 4, topY + 3, 4, PALETTE.steelDark);
   canvas.vLine(cx + 3, topY + 3, 4, PALETTE.steelDark);
+  if (back) canvas.rect(cx - 4, topY + 3, 8, 3, PALETTE.steelDark);
 }
 
-/** Bras : épaule, avant-bras plus fin, main. `x` est son bord gauche. */
-function drawArm(canvas: PixelCanvas, x: number, y: number, sleeve: number, skin: number): void {
-  canvas.rect(x, y, 3, 5, sleeve);
-  canvas.rect(x, y, 1, 5, shade(sleeve, 1.15));
-  canvas.rect(x, y + 5, 2, 3, sleeve);
-  canvas.rect(x, y + 8, 2, 2, skin);
+/**
+ * Un repère local accroché au poing.
+ *
+ * Toutes les armes sont décrites dans le même repère : origine au poing, `dy`
+ * négatif vers la pointe. `angle` fait tourner l'ensemble — et comme la main
+ * suit le squelette, l'arme suit la main.
+ *
+ * C'est ce qui a remplacé les trois positions d'arme dessinées à la main. Une
+ * rotation continue coûte moins cher à écrire, ne peut pas se désynchroniser
+ * du bras, et donne toutes les images intermédiaires gratuitement.
+ */
+interface Grip {
+  /** Un pixel dans le repère de l'arme. */
+  put(dx: number, dy: number, color: number): void;
+  /**
+   * Un rectangle dans ce repère, échantillonné au demi-pixel.
+   *
+   * Une rotation quelconque laisse des trous si l'on ne parcourt la source
+   * qu'au pixel entier : deux voisins peuvent atterrir à plus d'un pixel l'un
+   * de l'autre. Le demi-pas garantit une surface pleine sans épaissir le trait.
+   */
+  slab(dx: number, dy: number, w: number, h: number, color: number): void;
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// L'équipement
-// ───────────────────────────────────────────────────────────────────────────
+function gripAt(canvas: PixelCanvas, fist: Joint, angleDeg: number): Grip {
+  const cos = Math.cos(angleDeg * RAD);
+  const sin = Math.sin(angleDeg * RAD);
+
+  const put = (dx: number, dy: number, color: number): void => {
+    canvas.set(fist.x + dx * cos - dy * sin, fist.y + dx * sin + dy * cos, color);
+  };
+
+  return {
+    put,
+    slab: (dx, dy, w, h, color) => {
+      for (let j = 0; j <= h - 0.5; j += 0.5) {
+        for (let i = 0; i <= w - 0.5; i += 0.5) put(dx + i, dy + j, color);
+      }
+    },
+  };
+}
 
 /**
- * Épée tenue pointe en l'air.
+ * Épée, tenue au poing et tournant avec lui.
  *
- * Une lame de deux pixels — arête claire à gauche, corps plus sombre à droite
- * — plutôt qu'un trait uniforme : c'est la seule façon qu'un ruban d'acier ait
- * une épaisseur. Garde et pommeau en laiton pour la détacher de l'armure.
+ * Une lame de deux pixels — arête claire d'un côté, corps plus sombre de
+ * l'autre — plutôt qu'un trait uniforme : c'est la seule façon qu'un ruban
+ * d'acier ait une épaisseur. Garde et pommeau en laiton pour la détacher de
+ * l'armure.
  */
-/**
- * Le coup d'épée, en trois positions.
- *
- * `reach` négatif arme le bras — la lame part en arrière au-dessus de
- * l'épaule ; `reach` positif la sort vers l'avant. Entre les deux, la garde
- * haute. On ne fait pas tourner la lame pixel par pixel : à cette taille, trois
- * positions franches se lisent mieux qu'une rotation continue, et coûtent une
- * fraction du travail.
- */
-function drawSword(
-  canvas: PixelCanvas,
-  x: number,
-  gripY: number,
-  heavy: boolean,
-  pose: Pose,
-): void {
+function drawSword(canvas: PixelCanvas, fist: Joint, heavy: boolean, pose: Pose): void {
   const length = heavy ? 15 : 12;
+  const { put, slab } = gripAt(canvas, fist, pose.weapon);
 
-  if (pose.reach >= 0.7) {
-    // Coup porté : la lame s'abat en diagonale vers l'avant. En travers à
-    // l'horizontale, elle sortait du gabarit et l'unité frappait avec un
-    // moignon ; en diagonale, la taille se lit mieux **et** tient dans le
-    // cadre.
-    for (let i = 0; i < length - 2; i++) {
-      const bx = x + Math.round(i * 0.78);
-      const by = gripY - 2 + Math.round(i * 0.62);
-      canvas.set(bx, by, PALETTE.steelLight);
-      canvas.set(bx, by + 1, PALETTE.steel);
-      canvas.set(bx + 1, by + 1, PALETTE.steel);
-    }
-    // Garde en travers de la lame, puis fusée et pommeau vers l'arrière.
-    canvas.line(x - 2, gripY - 4, x + 1, gripY - 1, PALETTE.gold);
-    canvas.rect(x - 4, gripY - 4, 2, 2, PALETTE.woodDark);
-    canvas.set(x - 5, gripY - 5, PALETTE.gold);
-    return;
-  }
-
-  if (pose.reach <= -0.4) {
-    // Armé : la lame part en arrière, au-dessus de l'épaule.
-    for (let i = 0; i < length; i++) {
-      const bx = x - 1 - Math.round(i * 0.75);
-      const by = gripY - 2 - Math.round(i * 0.66);
-      canvas.set(bx, by, PALETTE.steelLight);
-      canvas.set(bx, by + 1, PALETTE.steel);
-    }
-    canvas.hLine(x - 2, gripY - 1, 5, PALETTE.gold);
-    canvas.rect(x, gripY, 2, 3, PALETTE.woodDark);
-    canvas.rect(x, gripY + 3, 2, 1, PALETTE.gold);
-    return;
-  }
-
-  // Garde haute, pointe en l'air : la position de repos et de transition.
-  canvas.rect(x, gripY - length, 1, length, PALETTE.steelLight);
-  canvas.rect(x + 1, gripY - length, 1, length, PALETTE.steel);
-  canvas.set(x, gripY - length - 1, PALETTE.steelLight);
+  slab(0, -length, 1, length, PALETTE.steelLight);
+  slab(1, -length, 1, length, PALETTE.steel);
+  put(0, -length - 1, PALETTE.steelLight);
 
   // Garde droite, débordant de part et d'autre
-  canvas.hLine(x - 2, gripY, 6, PALETTE.gold);
-  canvas.hLine(x - 2, gripY, 2, PALETTE.goldDark);
+  slab(-2, 0, 6, 1, PALETTE.gold);
+  slab(-2, 0, 2, 1, PALETTE.goldDark);
   // Fusée de cuir et pommeau
-  canvas.rect(x, gripY + 1, 2, 3, PALETTE.woodDark);
-  canvas.set(x, gripY + 1, PALETTE.wood);
-  canvas.rect(x, gripY + 4, 2, 1, PALETTE.gold);
+  slab(0, 1, 2, 3, PALETTE.woodDark);
+  put(0, 1, PALETTE.wood);
+  slab(0, 4, 2, 1, PALETTE.gold);
 }
 
 /**
  * Arme d'hast : la hampe dépasse la tête, et c'est **le** signe de
  * l'anti-cavalerie. Fer en feuille, à douille, sur une hampe de deux valeurs.
+ *
+ * Elle est tenue à deux mains, à un tiers de la hampe : le poing n'est donc
+ * pas au talon mais au milieu, et c'est autour de ce point qu'elle bascule de
+ * la position portée au coup d'estoc.
  */
-function drawSpear(
-  canvas: PixelCanvas,
-  x: number,
-  top: number,
-  bottom: number,
-  pose: Pose,
-): void {
-  // L'arme d'hast ne se lève pas : elle se pointe. Le coup est un coup
-  // d'estoc, hampe couchée et fer projeté vers l'avant — c'est le geste qui
-  // arrête une charge de cavalerie.
-  if (pose.reach >= 0.7) {
-    const level = top + 14;
-    canvas.rect(x - 9, level, 13, 1, PALETTE.wood);
-    canvas.rect(x - 9, level + 1, 13, 1, PALETTE.woodDark);
-    canvas.rect(x + 4, level - 1, 2, 3, PALETTE.steelDark);
-    canvas.rect(x + 6, level - 1, 2, 3, PALETTE.steelLight);
-    canvas.rect(x + 6, level + 1, 2, 1, PALETTE.steel);
-    canvas.set(x + 8, level, PALETTE.steelLight);
-    return;
-  }
+function drawSpear(canvas: PixelCanvas, fist: Joint, pose: Pose): void {
+  // Une hampe de trente pixels ne suit pas la même course qu'une lame : passé
+  // l'horizontale elle se plante dans le sol à travers les jambes, et en
+  // arrière elle balaie tout le sprite. On borne donc sa rotation — c'est une
+  // arme d'estoc, elle pointe, elle ne taille pas.
+  const angle = Math.max(-26, Math.min(94, pose.weapon));
+  const { put, slab } = gripAt(canvas, fist, angle);
+  const head = -17;
 
-  // Portée droite. À l'armement, elle recule d'un pixel et se redresse.
-  const shift = pose.reach <= -0.4 ? -1 : 0;
-  canvas.vLine(x + shift, top + 6, bottom - top - 6, PALETTE.wood);
-  canvas.vLine(x + 1 + shift, top + 6, bottom - top - 6, PALETTE.woodDark);
+  slab(0, head + 6, 1, 26, PALETTE.wood);
+  slab(1, head + 6, 1, 26, PALETTE.woodDark);
 
   // Fer : une pointe, puis un ventre de quatre pixels, puis la douille.
-  const fx = x + shift;
-  canvas.set(fx, top, PALETTE.steelLight);
-  canvas.rect(fx, top + 1, 2, 1, PALETTE.steelLight);
-  canvas.rect(fx - 1, top + 2, 4, 2, PALETTE.steelLight);
-  canvas.rect(fx + 1, top + 2, 2, 2, PALETTE.steel);
-  canvas.rect(fx, top + 4, 2, 1, PALETTE.steel);
-  canvas.rect(fx, top + 5, 2, 2, PALETTE.steelDark);
+  put(0, head, PALETTE.steelLight);
+  slab(0, head + 1, 2, 1, PALETTE.steelLight);
+  slab(-1, head + 2, 4, 2, PALETTE.steelLight);
+  slab(1, head + 2, 2, 2, PALETTE.steel);
+  slab(0, head + 4, 2, 1, PALETTE.steel);
+  slab(0, head + 5, 2, 2, PALETTE.steelDark);
 }
 
 /**
@@ -625,42 +766,11 @@ function drawQuiver(canvas: PixelCanvas, x: number, y: number): void {
  * le paysan polyvalent. Le fer est toujours du côté opposé au corps, sinon il
  * se perd dans le buste.
  */
-function drawTool(canvas: PixelCanvas, x: number, gripY: number, tool: Tool, pose: Pose): void {
-  // L'outil pivote autour du poing, d'un seul bloc.
-  //
-  // C'est la seule pièce du jeu qui tourne vraiment, et c'est justifié : un
-  // outil se reconnaît à sa forme, pas à son orientation, si bien qu'une hache
-  // redessinée à la main pour chaque angle serait trois fois le travail pour
-  // le même résultat. Le manche remonte au-dessus de l'épaule à l'armé, il
-  // s'abat vers l'avant à la frappe.
-  // Quatre positions, une par image du cycle de travail : armé, descente,
-  // impact, relevé. L'armement reste discret — au-delà d'un quart de radian en
-  // arrière, la tête de l'outil retombait en travers du visage du paysan.
-  const angle =
-    pose.reach >= 0.7 ? 1.15 : pose.reach >= 0.35 ? 0.55 : pose.reach <= -0.4 ? -0.22 : 0;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-
-  /**
-   * Pose un pixel exprimé dans le repère de l'outil : origine au poing, `dy`
-   * négatif vers la tête du manche.
-   */
-  const put = (dx: number, dy: number, color: number): void => {
-    canvas.set(x + dx * cos - dy * sin, gripY + dx * sin + dy * cos, color);
-  };
-
-  /**
-   * Rectangle dans ce même repère, échantillonné au demi-pixel.
-   *
-   * Une rotation quelconque laisse des trous si l'on ne parcourt la source
-   * qu'au pixel entier : deux voisins peuvent atterrir à plus d'un pixel l'un
-   * de l'autre. Le demi-pas garantit une surface pleine sans épaissir le trait.
-   */
-  const slab = (dx: number, dy: number, w: number, h: number, color: number): void => {
-    for (let j = 0; j <= h - 0.5; j += 0.5) {
-      for (let i = 0; i <= w - 0.5; i += 0.5) put(dx + i, dy + j, color);
-    }
-  };
+function drawTool(canvas: PixelCanvas, fist: Joint, tool: Tool, pose: Pose): void {
+  // L'outil pivote autour du poing, comme les armes, mais son manche est long :
+  // c'est lui qui donne le plus grand débattement du jeu, du fer au-dessus de
+  // l'épaule au fer contre le sol.
+  const { put, slab } = gripAt(canvas, fist, pose.weapon);
 
   /** Manche de deux valeurs, de `top` à `bottom` (repère de l'outil). */
   const haft = (top: number, bottom: number): void => {
@@ -803,27 +913,54 @@ function drawBanner(canvas: PixelCanvas, x: number, top: number, height: number,
  * c'est ce décalage, plus que tout le reste, qui donne la profondeur et
  * empêche la monture de se lire comme un bloc.
  */
-function drawHorse(canvas: PixelCanvas, cx: number, groundY: number, pose: Pose): void {
+function drawHorse(
+  canvas: PixelCanvas,
+  cx: number,
+  groundY: number,
+  pose: Pose,
+  view: View,
+): void {
   const coat = PALETTE.horse;
   const dark = PALETTE.horseDark;
   const deep = shade(PALETTE.horseDark, 0.75);
   const light = shade(PALETTE.horse, 1.18);
 
-  // Galop : les bipèdes diagonaux se croisent. Le postérieur gauche part avec
-  // l'antérieur droit, et inversement — un cheval dont les quatre membres
-  // bougent ensemble saute à cloche-pied.
-  const swing = Math.round(pose.stride * 3);
+  // Les quatre membres sont articulés comme ceux d'un homme — épaule, genou,
+  // paturon — et décalés par bipèdes **diagonaux** : l'antérieur droit part
+  // avec le postérieur gauche. Un cheval dont les quatre membres bougent
+  // ensemble saute à cloche-pied.
+  //
+  // Les phases : antérieur proche 0, postérieur proche ½, antérieur lointain
+  // ½, postérieur lointain 0. C'est l'ordre du trot, la seule allure lisible
+  // à quatre images.
+  const a = pose.phase * Math.PI * 2;
+  const reach = 16;
+  const legAngle = (offset: number): number => Math.sin(a + offset) * reach;
+  const legFlex = (offset: number): number => 8 + 14 * (1 - Math.sin(a + offset));
+
   // Le corps se soulève avec la foulée, mais deux fois moins que le cavalier :
   // c'est ce décalage d'amplitude qui donne le rebond de la selle.
-  const lift = Math.round(pose.bob * 0.5);
+  const lift = -Math.round(Math.abs(Math.cos(a)));
+
+  /** Un membre : bras/cuisse, canon, sabot. Les postérieurs plient à l'envers. */
+  const hoof = (
+    x: number,
+    top: number,
+    upperDeg: number,
+    flexDeg: number,
+    upper: number,
+    lower: number,
+    color: number,
+  ): void => {
+    const chain = limbChain({ x, y: groundY + lift - top }, upperDeg, flexDeg, upper, lower);
+    bone(canvas, { x, y: groundY + lift - top }, chain.joint, 4, color);
+    bone(canvas, chain.joint, chain.end, 3, color);
+    canvas.rect(chain.end.x - 2, chain.end.y - 1, 4, 1, PALETTE.outline);
+  };
 
   // ── Membres du côté opposé, posés en premier ────────────────────────────
-  // Antérieur droit
-  canvas.rect(cx + 3 - swing, groundY - 11, 3, 7, deep);
-  canvas.rect(cx + 3 - swing, groundY - 5, 3, 5, deep);
-  // Postérieur droit : cuisse large, puis canon fin
-  canvas.rect(cx - 9 + swing, groundY - 12, 4, 6, deep);
-  canvas.rect(cx - 8 + swing, groundY - 7, 3, 7, deep);
+  hoof(cx + 5, 13, legAngle(Math.PI), legFlex(Math.PI), 6, 7, deep);
+  hoof(cx - 9, 14, legAngle(0), legFlex(0), 6, 8, deep);
 
   // ── Corps ───────────────────────────────────────────────────────────────
   // Tout ce qui suit est accroché au corps, qui monte et descend ; seuls les
@@ -869,16 +1006,10 @@ function drawHorse(canvas: PixelCanvas, cx: number, groundY: number, pose: Pose)
   canvas.rect(cx + 5, body - 26, 4, 5, dark);
 
   // ── Membres du côté visible ─────────────────────────────────────────────
-  // Ils partent du corps et vont jusqu'au sol : la cuisse suit le rebond, le
-  // sabot ne le suit pas. Ils se croisent en diagonale avec ceux du fond.
-  // Antérieur gauche : épaule, avant-bras, canon
-  canvas.rect(cx + 5 + swing, body - 13, 4, 6, coat);
-  canvas.rect(cx + 5 + swing, body - 8, 3, groundY - body + 8, coat);
-  canvas.rect(cx + 5 + swing, groundY - 1, 4, 1, PALETTE.outline);
-  // Postérieur gauche : la cuisse déborde vers l'arrière, le jarret est marqué
-  canvas.rect(cx - 11 - swing, body - 14, 5, 7, coat);
-  canvas.rect(cx - 10 - swing, body - 8, 3, groundY - body + 8, coat);
-  canvas.rect(cx - 11 - swing, groundY - 1, 4, 1, PALETTE.outline);
+  // Même chaîne que ceux du fond, à une demi-foulée de décalage et dans la
+  // valeur claire.
+  hoof(cx + 6, 13, legAngle(0), legFlex(0), 6, 7, coat);
+  hoof(cx - 10, 14, legAngle(Math.PI), legFlex(Math.PI), 6, 8, coat);
 
   // ── Queue ───────────────────────────────────────────────────────────────
   canvas.rect(cx - 14, body - 19, 3, 6, dark);
@@ -903,6 +1034,13 @@ function drawHorse(canvas: PixelCanvas, cx: number, groundY: number, pose: Pose)
   canvas.line(cx + 14, body - 26, cx + 7, body - 24, PALETTE.woodLight);
   canvas.set(cx + 12, body - 25, PALETTE.steel);
   canvas.set(cx + 13, body - 24, PALETTE.woodDark);
+
+  // De dos, on voit la croupe et non le poitrail : la queue passe devant.
+  if (view === 'back') {
+    canvas.rect(cx - 13, body - 20, 4, 8, dark);
+    canvas.rect(cx - 13, body - 20, 4, 1, coat);
+    canvas.rect(cx - 12, body - 13, 3, 6, deep);
+  }
 }
 
 /**
@@ -921,36 +1059,49 @@ function drawRider(
   team: Team,
   kit: Kit,
   pose: Pose,
+  view: View,
 ): void {
   const waistY = hipY - 1;
   const shoulderY = waistY - 10;
   // À cheval, le buste ne se penche pas comme à pied : il accompagne, moitié
   // moins. Un cavalier plié en avant sur sa selle se lit comme un homme qui
   // tombe.
-  const chestX = cx + Math.round(pose.lean * 0.3);
-  const reach = Math.round(pose.reach * 3);
+  const chestX = cx + Math.round(pose.lean * 0.3 + pose.shoulder * 0.5);
 
   const sleeve = kit.heavy ? PALETTE.steel : team.main;
   const sleeveDark = kit.heavy ? PALETTE.steelDark : team.dark;
 
+  // Mêmes chaînes que le fantassin, mais les bras seuls : les jambes sont
+  // pliées sur le flanc et ne portent rien.
+  const shoulders: Joint[] = [
+    { x: chestX + 4, y: shoulderY + 2 },
+    { x: chestX - 4, y: shoulderY + 2 },
+  ];
+  const arms = [0, 1].map((side) =>
+    limbChain(shoulders[side] as Joint, pose.arm[side] ?? 0, pose.elbow[side] ?? 0, 5, 4),
+  );
+  const nearArm = arms[0] as { joint: Joint; end: Joint };
+  const farArm = arms[1] as { joint: Joint; end: Joint };
+
   drawCloak(canvas, chestX - 10, shoulderY + 1, team);
   drawRiderLeg(canvas, cx, hipY, kit.heavy, team);
-  drawArm(canvas, chestX + 4, shoulderY + 1, sleeveDark, PALETTE.skinDark);
+  drawArm(canvas, shoulders[1] as Joint, farArm, sleeveDark, PALETTE.skinDark);
 
-  drawTorso(canvas, chestX, shoulderY, waistY, team, kit);
-  drawHead(canvas, chestX, shoulderY - 8, team, kit);
-  drawArm(canvas, chestX + 5 + Math.max(0, reach), shoulderY + 2, sleeve, PALETTE.skin);
+  drawTorso(canvas, chestX, shoulderY, waistY, team, kit, view);
+  drawHead(canvas, chestX, shoulderY - 8, team, kit, view);
 
   // La lance couchée n'a pas de geste : elle est déjà pointée. Elle se relève
-  // d'un pixel à l'armement, ce qui suffit à faire vivre la charge.
+  // avec le poing, ce qui suffit à faire vivre la charge.
   if (kit.polearm) {
-    drawCouchedLance(canvas, chestX - 3, shoulderY + 6 - reach, chestX + 22, shoulderY, team);
+    drawCouchedLance(canvas, nearArm.end.x - 6, nearArm.end.y, chestX + 22, shoulderY, team);
   } else {
-    drawSword(canvas, chestX + 5 + reach, shoulderY + 6, kit.heavy, pose);
+    drawSword(canvas, nearArm.end, kit.heavy, pose);
   }
 
+  drawArm(canvas, shoulders[0] as Joint, nearArm, sleeve, PALETTE.skin);
+
   if (kit.leader) drawBanner(canvas, chestX - 8, shoulderY - 8, 26, team);
-  else drawShield(canvas, chestX - 8, shoulderY + 2, team, kit.heavy);
+  else if (view === 'front') drawShield(canvas, chestX - 8, shoulderY + 2, team, kit.heavy);
 }
 
 /**

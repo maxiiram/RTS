@@ -25,7 +25,7 @@ import type { Entity, PlayerId, World } from '../sim/types.ts';
 import { currentAction, isEntityVisible, visibilityAt } from '../sim/world.ts';
 import { ACTION_COLORS, PALETTE } from './palette.ts';
 import { buildingSprite, groundSprite, resourceSprite, unitSprite, wallSprite } from '../art/index.ts';
-import { frameCount, type Motion, STRIDE_LENGTH } from '../art/animation.ts';
+import { frameCount, type Motion, STRIDE_LENGTH, type View } from '../art/animation.ts';
 import { WALL_LINKS } from '../art/buildings.ts';
 import { textureFor } from './textures.ts';
 
@@ -37,6 +37,8 @@ interface EntityView {
   visualKey: string;
   /** Image d'animation affichée, pour n'échanger la texture qu'au changement. */
   clipKey: string;
+  /** Dernier cap connu : conservé quand l'unité s'arrête. */
+  heading: { view: View; mirror: boolean };
   lastHp: number;
   lastSelected: boolean;
   lastAction: string;
@@ -407,18 +409,23 @@ export class Renderer {
     // texture. Toutes les images d'une unité partagent le même gabarit et le
     // même point d'ancrage, donc l'échange se réduit à une affectation.
     const clip = entity.kind === 'unit' ? unitClip(world, entity) : null;
-    const clipKey = clip ? `${clip.motion}:${clip.frame}` : '';
+    // Le cap n'est connu que tant que l'unité avance : à l'arrêt, elle garde
+    // celui de son dernier pas. Une figure qui pivote vers le joueur dès
+    // qu'elle s'arrête donne le pire des deux mondes.
+    const previous = this.views.get(entity.id);
+    const heading = headingOf(entity) ?? previous?.heading ?? { view: 'front', mirror: false };
+    const clipKey = clip ? `${clip.motion}:${clip.frame}:${heading.view}:${heading.mirror}` : '';
 
     const artFor = (): ReturnType<typeof unitSprite> =>
       entity.kind === 'unit'
-        ? unitSprite(entity.defId, color, clip?.motion, clip?.frame)
+        ? unitSprite(entity.defId, color, clip?.motion, clip?.frame, heading.view)
         : entity.kind === 'building'
           ? entity.defId === 'muraille'
             ? wallSprite(color, links, isSite)
             : buildingSprite(entity.defId, color, isSite)
           : resourceSprite(entity.defId, Math.floor(entity.x), Math.floor(entity.y));
 
-    let view = this.views.get(entity.id);
+    let view = previous;
 
     if (!view || view.visualKey !== visualKey) {
       view?.container.destroy({ children: true });
@@ -440,6 +447,7 @@ export class Renderer {
         overlay,
         visualKey,
         clipKey,
+        heading,
         lastHp: -1,
         lastSelected: !selected,
         lastAction: '',
@@ -447,8 +455,14 @@ export class Renderer {
       this.views.set(entity.id, view);
     } else if (view.clipKey !== clipKey) {
       view.clipKey = clipKey;
+      view.heading = heading;
       view.body.texture = textureFor(artFor());
     }
+
+    // Les quatre caps s'obtiennent en retournant deux dessins, pas en en
+    // dessinant quatre : le miroir est appliqué à l'affichage, ce qui ne coûte
+    // rien et divise par deux le nombre de textures.
+    view.body.scale.x = heading.mirror ? -1 : 1;
 
     const p = tileToScreen(entity.x, entity.y);
     view.container.position.set(p.x, p.y);
@@ -687,6 +701,7 @@ function unitClip(world: World, entity: Entity): { motion: Motion; frame: number
     return { motion: 'walk', frame: Math.floor(entity.travelled / STRIDE_LENGTH) };
   }
 
+
   const action = currentAction(entity);
   const cooldown = UNITS[entity.defId]?.combat?.attackCooldown ?? 0;
 
@@ -700,6 +715,29 @@ function unitClip(world: World, entity: Entity): { motion: Motion; frame: number
   }
 
   return { motion: 'idle', frame: freeRunning(world, entity, 2.0, frameCount('idle')) };
+}
+
+/**
+ * Vers où regarde une unité, en deux nombres.
+ *
+ * La grille isométrique a huit directions ; on n'en dessine que deux — de face
+ * et de dos — et le retournement horizontal du sprite donne les autres. Le
+ * signe de `dx + dy` dit si l'unité vient vers le joueur ou s'en éloigne, le
+ * signe de `dx - dy` de quel côté de l'écran elle va.
+ *
+ * Sans ça, une unité traversait la carte en fixant le joueur. C'est le défaut
+ * qui se remarquait avant tous les autres : on peut pardonner une foulée
+ * approximative, pas un homme qui marche de côté sans tourner la tête.
+ */
+function headingOf(entity: Entity): { view: View; mirror: boolean } | null {
+  const next = entity.path[0];
+  if (!next) return null;
+
+  const dx = next.x - entity.x;
+  const dy = next.y - entity.y;
+  if (Math.abs(dx) + Math.abs(dy) < 0.001) return null;
+
+  return { view: dx + dy >= 0 ? 'front' : 'back', mirror: dx - dy < 0 };
 }
 
 /** Image d'un cycle libre, décalée par l'unité pour désynchroniser un groupe. */

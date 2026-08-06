@@ -9,7 +9,7 @@
 
 import { BUILDING_IDS } from '../data/buildings.ts';
 import { UNIT_IDS } from '../data/units.ts';
-import { frameCount, type Motion } from './animation.ts';
+import { frameCount, type Motion, type View } from './animation.ts';
 import type { Sprite } from './canvas.ts';
 import { drawBuilding, drawWall } from './buildings.ts';
 import { drawBerryBush, drawGroundPattern, drawOre, drawTree } from './nature.ts';
@@ -40,9 +40,10 @@ export function unitSprite(
   kingdomColor: number,
   motion: Motion = 'idle',
   frame = 0,
+  view: View = 'front',
 ): Sprite {
-  return cached(`unit:${defId}:${kingdomColor}:${motion}:${frame}`, () =>
-    drawUnit(defId, kingdomColor, motion, frame),
+  return cached(`unit:${defId}:${kingdomColor}:${motion}:${frame}:${view}`, () =>
+    drawUnit(defId, kingdomColor, motion, frame, view),
   );
 }
 
@@ -122,21 +123,22 @@ export function catalogue(): CatalogueEntry[] {
   // C'est le seul moyen de juger une animation sans la jouer — une image ratée
   // se voit d'un coup d'œil sur la bande, alors qu'elle passe inaperçue à cinq
   // images par seconde dans une mêlée.
-  const strips: ReadonlyArray<{ id: string; motion: Motion }> = [
+  const strips: ReadonlyArray<{ id: string; motion: Motion; view?: View }> = [
     { id: 'soldat', motion: 'walk' },
+    { id: 'soldat', motion: 'walk', view: 'back' },
     { id: 'soldat', motion: 'strike' },
     { id: 'bucheron', motion: 'work' },
     { id: 'archer', motion: 'strike' },
-    { id: 'chevalier_lance', motion: 'strike' },
     { id: 'chevalier', motion: 'walk' },
   ];
 
   for (const strip of strips) {
+    const view = strip.view ?? 'front';
     for (let frame = 0; frame < frameCount(strip.motion); frame++) {
       entries.push({
-        section: `Animation — ${strip.id} ${strip.motion}`,
+        section: `Animation — ${strip.id} ${strip.motion}${view === 'back' ? ' (de dos)' : ''}`,
         name: `${frame + 1}`,
-        sprite: unitSprite(strip.id, saphir, strip.motion, frame),
+        sprite: unitSprite(strip.id, saphir, strip.motion, frame, view),
       });
     }
   }
