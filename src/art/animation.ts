@@ -132,26 +132,47 @@ function walkPose(phase: number): Pose {
   };
 }
 
-/** Repos : la respiration, et rien d'autre. Une figure figée est un décor. */
+/**
+ * Repos : une figure figée est un décor, pas une unité.
+ *
+ * Deux mouvements superposés, et volontairement désaccordés : la respiration
+ * fait son cycle complet, le report de poids d'un appui sur l'autre en fait un
+ * demi. Ils ne retombent donc jamais deux fois de suite sur la même
+ * combinaison, et le repos ne se lit pas comme une boucle.
+ */
 function idlePose(phase: number): Pose {
   const breath = Math.sin(phase * Math.PI * 2);
+  const sway = Math.sin(phase * Math.PI);
+
   return {
     ...AT_REST,
+    // Le poids passe d'une jambe à l'autre : un pixel de bassin, pas plus.
+    hip: [4 + sway, -4 + sway],
+    knee: [6 - sway * 2, 6 + sway * 2],
+    // Les bras suivent la cage thoracique, avec un temps de retard.
     arm: [2 + breath, -2 - breath],
     elbow: [8 + breath * 2, 8 + breath * 2],
-    bob: breath > 0.5 ? -1 : 0,
-    weapon: breath > 0.5 ? -3 : 0,
+    bob: -Math.max(0, breath) * 0.8,
+    shoulder: sway * 0.4,
+    // L'arme oscille de deux degrés : à peine visible seule, mais c'est ce qui
+    // empêche une garde de se lire comme un mannequin.
+    weapon: breath * 2.5,
     phase,
   };
 }
 
 /**
- * Coup d'arme, en cinq temps.
+ * Coup d'arme : cinq **poses clés**, pas cinq images.
  *
- * L'ordre est celui du rechargement d'attaque, donc l'impact vient **en
- * premier** : on frappe, on accompagne, on se reprend, on réarme, on attend
- * le fil de l'épée en l'air. La dernière image est celle de l'armement, juste
- * avant que le coup suivant reparte de la première.
+ * L'ordre est celui du rechargement d'attaque, donc l'impact vient en premier :
+ * on frappe, on accompagne, on se reprend, on réarme, et le coup suivant
+ * repart de la première.
+ *
+ * `phase` place chaque clé sur la durée du cycle, et l'espacement est
+ * volontairement inégal — c'est là qu'est le rythme. De l'armement (0,82) à
+ * l'impact (1,0) il ne reste qu'un sixième du cycle : la frappe part sec, la
+ * reprise est longue. Réparties à intervalles réguliers, les mêmes poses
+ * donnaient un moulinet de métronome.
  */
 const STRIKE: readonly Pose[] = [
   // Impact : tout le corps est passé devant, l'arme est au bout de sa course.
@@ -178,7 +199,7 @@ const STRIKE: readonly Pose[] = [
     shoulder: -1,
     lean: 2,
     reach: 1,
-    phase: 0.2,
+    phase: 0.1,
   },
   // Reprise : le bras revient, l'arme se redresse.
   {
@@ -191,7 +212,7 @@ const STRIKE: readonly Pose[] = [
     shoulder: 0,
     lean: 1,
     reach: 0.2,
-    phase: 0.4,
+    phase: 0.3,
   },
   // Garde : pointe en l'air, poids réparti.
   {
@@ -204,7 +225,7 @@ const STRIKE: readonly Pose[] = [
     shoulder: 1,
     lean: 0,
     reach: 0,
-    phase: 0.6,
+    phase: 0.55,
   },
   // Armement : l'arme part en arrière au-dessus de l'épaule, le buste se
   // dérobe. C'est l'image qui annonce le coup suivant.
@@ -218,17 +239,20 @@ const STRIKE: readonly Pose[] = [
     shoulder: 2,
     lean: -2,
     reach: -1,
-    phase: 0.8,
+    phase: 0.82,
   },
 ];
 
 /**
- * Récolte et construction.
+ * Récolte et construction, en cinq poses clés.
  *
  * Le même geste que le combat, mais plus rond et sans le poids du buste : on
  * abat un arbre, on ne charge pas. L'outil part de plus haut et descend plus
  * bas — un bras qui frappe s'arrête à hauteur d'homme, un bras qui travaille
  * va jusqu'au sol.
+ *
+ * Même rythme inégal que le coup d'arme : on lève lentement, on abat d'un
+ * coup, on se redresse posément.
  */
 const WORK: readonly Pose[] = [
   {
@@ -253,7 +277,7 @@ const WORK: readonly Pose[] = [
     shoulder: 1,
     lean: 0,
     reach: -0.2,
-    phase: 0.2,
+    phase: 0.3,
   },
   {
     hip: [10, -8],
@@ -265,7 +289,7 @@ const WORK: readonly Pose[] = [
     shoulder: -1,
     lean: 2,
     reach: 0.6,
-    phase: 0.4,
+    phase: 0.44,
   },
   {
     hip: [12, -10],
@@ -277,7 +301,7 @@ const WORK: readonly Pose[] = [
     shoulder: -2,
     lean: 3,
     reach: 1,
-    phase: 0.6,
+    phase: 0.54,
   },
   {
     hip: [6, -6],
@@ -289,20 +313,88 @@ const WORK: readonly Pose[] = [
     shoulder: 0,
     lean: 1,
     reach: 0.2,
-    phase: 0.8,
+    phase: 0.76,
   },
 ];
 
-/** Nombre d'images par cycle. Huit pour la marche : en dessous, elle saccade. */
+/**
+ * Nombre d'images par cycle.
+ *
+ * Généreux, et il peut se permettre de l'être : rien ici n'est dessiné à la
+ * main. La marche et le repos sont **calculés** à partir de la phase, le coup
+ * d'arme et le travail **interpolés** entre leurs poses clés. Doubler le
+ * nombre d'images ne coûte donc que du cache, pas du travail.
+ *
+ * Les valeurs viennent de la cadence réelle en jeu :
+ *
+ * - la marche d'un fantassin à 1,7 tuile/s défile à ~20 images/s ;
+ * - un coup d'arme occupe les deux secondes de rechargement, soit 8 images/s ;
+ * - le repos respire sur trois secondes, soit 3 images/s — c'est lent, mais
+ *   c'est une respiration, pas un geste.
+ */
 export const FRAMES: Record<Motion, number> = {
-  idle: 4,
-  walk: 8,
-  strike: STRIKE.length,
-  work: WORK.length,
+  idle: 8,
+  walk: 16,
+  strike: 16,
+  work: 16,
 };
 
 export function frameCount(motion: Motion): number {
   return FRAMES[motion];
+}
+
+/** Interpolation linéaire de deux nombres. */
+function mix(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/**
+ * Interpolation de deux poses.
+ *
+ * Possible seulement parce qu'une pose est faite d'angles et de rien d'autre :
+ * on peut faire la moyenne de deux angles de genou, on ne peut pas faire la
+ * moyenne de deux dessins. C'est tout l'intérêt d'avoir mis les figures sur un
+ * squelette — les images intermédiaires viennent sans travail supplémentaire.
+ */
+function blend(a: Pose, b: Pose, t: number, phase: number): Pose {
+  return {
+    hip: [mix(a.hip[0], b.hip[0], t), mix(a.hip[1], b.hip[1], t)],
+    knee: [mix(a.knee[0], b.knee[0], t), mix(a.knee[1], b.knee[1], t)],
+    arm: [mix(a.arm[0], b.arm[0], t), mix(a.arm[1], b.arm[1], t)],
+    elbow: [mix(a.elbow[0], b.elbow[0], t), mix(a.elbow[1], b.elbow[1], t)],
+    weapon: mix(a.weapon, b.weapon, t),
+    bob: mix(a.bob, b.bob, t),
+    shoulder: mix(a.shoulder, b.shoulder, t),
+    lean: mix(a.lean, b.lean, t),
+    reach: mix(a.reach, b.reach, t),
+    phase,
+  };
+}
+
+/**
+ * Échantillonne une suite de poses clés à un instant du cycle.
+ *
+ * Les clés sont cycliques : après la dernière on revient à la première, ce qui
+ * referme la boucle sans qu'on ait à la dupliquer. Leur espacement inégal
+ * porte le rythme du geste — voir `STRIKE`.
+ */
+function sampleKeys(keys: readonly Pose[], time: number): Pose {
+  const last = keys[keys.length - 1] as Pose;
+  const first = keys[0] as Pose;
+
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i] as Pose;
+    const next = keys[i + 1] ?? first;
+    // La dernière clé se referme sur la première, donc son intervalle court
+    // jusqu'à la fin du cycle.
+    const end = i + 1 < keys.length ? next.phase : 1;
+    if (time < end || i === keys.length - 1) {
+      const span = end - key.phase;
+      return blend(key, next, span > 0 ? (time - key.phase) / span : 0, time);
+    }
+  }
+
+  return blend(last, first, 0, time);
 }
 
 /**
@@ -314,12 +406,19 @@ export function frameCount(motion: Motion): number {
  */
 export function poseOf(motion: Motion, frame: number): Pose {
   const count = FRAMES[motion];
-  const index = ((frame % count) + count) % count;
+  const time = (((frame % count) + count) % count) / count;
 
-  if (motion === 'walk') return walkPose(index / count);
-  if (motion === 'idle') return idlePose(index / count);
-  return (motion === 'strike' ? STRIKE : WORK)[index] ?? AT_REST;
+  if (motion === 'walk') return walkPose(time);
+  if (motion === 'idle') return idlePose(time);
+  return sampleKeys(motion === 'strike' ? STRIKE : WORK, time);
 }
 
-/** Longueur d'une foulée, en tuiles : la distance entre deux images de marche. */
-export const STRIDE_LENGTH = 0.17;
+/**
+ * Longueur d'une foulée, en tuiles : la distance entre deux images de marche.
+ *
+ * Le cycle complet couvre seize fois cette valeur, soit 1,36 tuile — deux pas
+ * d'un mètre pour une tuile de deux mètres. C'est cette constante, et non une
+ * durée, qui garantit que les pieds ne patinent jamais : une unité deux fois
+ * plus rapide franchit deux fois plus d'images dans le même temps.
+ */
+export const STRIDE_LENGTH = 0.085;

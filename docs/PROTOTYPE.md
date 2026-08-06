@@ -49,9 +49,11 @@ totale de l'adversaire, GDD §8).
   un tas de quelques tuiles. C'est ce qui donne un sens au camp de bûcheron et à
   la mine — on pose un dépôt au bord d'une zone — et ce qui fait des zones du
   centre un enjeu territorial plutôt qu'un semis d'arbres isolés.
-- **Unités animées sur un squelette** : quatre cycles — repos, marche à huit
-  images, coup d'arme, travail — décrits en angles d'articulation (cuisse,
-  genou, épaule, coude, arme) et non en décalages de pixels. La jambe se
+- **Unités animées sur un squelette** : quatre cycles de seize images — repos,
+  marche, coup d'arme, travail — décrits en angles d'articulation (cuisse,
+  genou, épaule, coude, arme) et non en décalages de pixels. La marche et le
+  repos sont calculés, le coup d'arme et le travail interpolés entre cinq poses
+  clés espacées inégalement : la frappe part sec, la reprise est longue. La jambe se
   raccourcit quand elle se plie, le corps monte et descend tout seul parce que
   le pied le plus bas est posé au sol, et l'arme, accrochée au poing, tourne
   avec lui.

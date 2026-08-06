@@ -132,9 +132,11 @@ export function catalogue(): CatalogueEntry[] {
     { id: 'chevalier', motion: 'walk' },
   ];
 
+  // Une image sur deux : à seize par cycle, la planche devient illisible et
+  // deux images voisines ne se distinguent de toute façon pas à l'œil.
   for (const strip of strips) {
     const view = strip.view ?? 'front';
-    for (let frame = 0; frame < frameCount(strip.motion); frame++) {
+    for (let frame = 0; frame < frameCount(strip.motion); frame += 2) {
       entries.push({
         section: `Animation — ${strip.id} ${strip.motion}${view === 'back' ? ' (de dos)' : ''}`,
         name: `${frame + 1}`,

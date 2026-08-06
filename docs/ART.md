@@ -264,8 +264,27 @@ en positions, exactement comme un personnage articulé.
 | `weapon` | Angle de l'arme autour du poing |
 | `bob`, `shoulder`, `lean` | Respiration, contre-rotation, poids du buste |
 
-Quatre cycles : **repos** (4 images), **marche** (8), **coup d'arme** (5),
-**travail** (5). Chacun en deux vues, de face et de dos.
+Quatre cycles : **repos** (8 images), **marche** (16), **coup d'arme** (16),
+**travail** (16). Chacun en deux vues, de face et de dos.
+
+Ce nombre peut se permettre d'être généreux parce que **rien n'est dessiné à
+la main image par image** : la marche et le repos sont calculés à partir de la
+phase, le coup d'arme et le travail interpolés entre cinq poses clés. Doubler
+le nombre d'images ne coûte que du cache. Les valeurs viennent de la cadence
+réelle en jeu : ~20 images/s pour la marche d'un fantassin, 8 pour un coup
+d'arme étalé sur ses deux secondes de rechargement, 3 pour une respiration.
+
+### Poses clés et intervalles
+
+Le coup d'arme et le travail sont donnés en **cinq poses clés** portant chacune
+sa place sur la durée du cycle, et cet espacement est volontairement inégal :
+c'est là qu'est le rythme. De l'armement (0,82) à l'impact (1,0) il ne reste
+qu'un sixième du cycle — la frappe part sec, la reprise est longue. Réparties à
+intervalles réguliers, les mêmes poses donnaient un moulinet de métronome.
+
+L'interpolation n'est possible que parce qu'une pose est faite d'angles et de
+rien d'autre : on peut faire la moyenne de deux angles de genou, on ne peut pas
+faire la moyenne de deux dessins.
 
 ### Ce que le squelette donne gratuitement
 
@@ -344,11 +363,15 @@ geste.
 
 ### Ce que ça coûte
 
-Chaque couple (unité, mouvement, image, vue) est un sprite entier : le pixel
-art ne s'interpole pas. Le catalogue complet — douze unités, deux royaumes,
-quatre cycles, deux vues — fait **1 056 images, 5,3 Mo, 142 ms** à fabriquer.
-Et il n'est jamais fabriqué en entier : chaque image est peinte à la première
-demande puis gardée, si bien qu'une partie n'en construit qu'une fraction.
+Chaque couple (unité, mouvement, image, vue) est un sprite entier : ce sont les
+*poses* qui s'interpolent, pas les dessins. Le catalogue complet — douze
+unités, deux royaumes, quatre cycles, deux vues, cinquante-six images — fait
+**2 688 sprites, 13,5 Mo, 407 ms** à fabriquer.
+
+Il n'est jamais fabriqué en entier : chaque image est peinte à la première
+demande puis gardée, si bien qu'une partie n'en construit qu'une fraction. Et
+seules les images réellement affichées occupent la carte graphique — quelques
+dizaines à un instant donné, quel que soit le catalogue.
 
 Les bandes d'animation de `docs/sprites.png` montrent chaque cycle image par
 image. C'est le seul moyen de juger une animation sans la jouer : une image
