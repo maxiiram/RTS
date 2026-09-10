@@ -1,0 +1,68 @@
+name: Pages
+
+# Publie le jeu sur GitHub Pages.
+#
+# Le jeu est une page statique : `npm run build` produit un dossier `dist`
+# entièrement autonome, que Pages sert tel quel. La configuration Vite utilise
+# `base: './'`, donc les chemins sont relatifs et le jeu fonctionne aussi bien
+# à la racine d'un domaine que dans un sous-dossier comme `/RTS/`.
+#
+# Deux préalables, à faire une fois dans les réglages du dépôt :
+#   1. le dépôt doit être public (Pages sur dépôt privé demande un compte payant) ;
+#   2. Settings → Pages → Source : « GitHub Actions ».
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un seul déploiement à la fois, et on abandonne celui en cours si un nouveau
+# arrive : inutile de publier une version déjà périmée.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # Playwright ne sert qu'au test de bout en bout, qui a besoin d'un vrai
+      # navigateur et ne tourne pas ici : inutile de télécharger Chromium.
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      # On ne publie pas un jeu qui ne compile pas ou dont la simulation est
+      # cassée. Les deux vérifications prennent quelques secondes.
+      - run: npm run typecheck
+      - run: npm test
+
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    # Seule la branche par défaut est publiée. Écrit ainsi plutôt qu'avec un
+    # nom de branche en dur, pour que renommer la branche ne casse rien.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

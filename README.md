@@ -4,11 +4,16 @@ RTS médiéval en pixel art 8-bit, vue isométrique, jouable dans le navigateur.
 Deux royaumes humains, quatre ressources, trois âges, et un rythme lent et
 réfléchi façon *Age of Empires 1*.
 
+### ▶ [Jouer maintenant](https://maxiiram.github.io/RTS/)
+
+Rien à installer : le jeu est une page statique, publiée à chaque `push` sur la
+branche par défaut. Ajouter `?seed=1234` à l'adresse rejoue une carte donnée.
+
 *Titre de travail — le nom définitif reste à trouver.*
 
 ```bash
 npm install
-npm run dev     # http://localhost:5173
+npm run dev     # http://localhost:5173, avec rechargement à chaud
 ```
 
 ## État du projet
@@ -19,13 +24,15 @@ destruction de la base adverse, contre une IA d'escarmouche.
 - ✅ [Game Design Document](docs/GDD.md)
 - ✅ [Équilibrage chiffré](docs/BALANCE.md) — unités, bâtiments, économie, âges
 - ✅ [Prototype jouable](docs/PROTOTYPE.md) — carte, récolte, construction, combat, IA
-- ✅ Brouillard de guerre et carte de 120 × 120
+- ✅ Brouillard de guerre et carte de 120 × 120, tirée au sort à chaque partie
 - ⬜ Arbre technologique
 - ✅ [Direction artistique](docs/ART.md) — palette, sprites, planche de référence
+- ✅ Animation des unités — marche, combat, récolte, quatre caps
 - ⬜ Multijoueur
 
-L'art est en place — pixel art 8-bit, palette chaude, tout le jeu couvert. Il
-manque l'animation : rien ne bouge encore.
+L'art est en place — pixel art 8-bit, palette chaude, tout le jeu couvert — et
+les unités sont animées sur un squelette articulé : elles marchent, frappent,
+récoltent, et regardent où elles vont.
 
 ## Stack
 
